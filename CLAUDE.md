@@ -22,7 +22,8 @@ O visitante nunca fala com o Drive nem com o Apps Script.
   do drive pessoal do Paulo, já partilhada com qualquer pessoa com o link). NÃO usar a unidade partilhada:
   tem muitos membros, incluindo uma empresa externa com conta interna. Só copiar para lá fotos com autorização de imagem.
   Uma subpasta por artigo, com o mês no início do nome ("2026-05 Maio"; já criadas de 2025-11 a 2026-06).
-  O .gs procura as fotos de cada artigo primeiro na pasta do seu mês; fotos soltas na raiz servem a todos.
+  Todas as fotos da pasta do mês entram no artigo (por ordem do nome); as nomeadas no Doc vêm primeiro e a capa é a
+  do Doc ou, sem ela, a primeira por nome (ex.: "00-..."). Fotos soltas na raiz só entram se o Doc as nomear.
 
 ## Convenções dos Docs (confirmadas nos 20 Docs existentes -> 8 artigos, nov 2025 a jun 2026)
 - Um artigo por mês; título do Doc com mês e ano. Vence a versão editada por último.

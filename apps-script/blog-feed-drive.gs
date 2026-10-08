@@ -146,15 +146,20 @@ function parseDoc_(file, key, images) {
   if (!post.summary) post.summary = (post.intro[0] || '').slice(0, 300);
   if (post.status === 'hold') post.warnings.push('Nota sobre autorização de imagem: confirmar antes de publicar');
 
-  // fotos: cruzar nomes do Doc com ficheiros reais do Drive
+  // fotos: todas as da pasta do mês do artigo; as nomeadas no Doc vêm primeiro (a capa à cabeça)
+  const local = images.byMonth[key] || {};
+  const pick = n => local[n.toLowerCase()] || images.all[n.toLowerCase()];
   const resolved = [], missing = [];
+  const add = f => { if (!resolved.some(r => r.driveId === f.id)) resolved.push({ name: f.name, driveId: f.id, thumb: 'https://lh3.googleusercontent.com/d/' + f.id + '=w1600' }); };
   [post.cover].concat(post.photos).filter(Boolean).forEach(n => {
-    const f = (images.byMonth[key] || {})[n.toLowerCase()] || images.all[n.toLowerCase()];
-    if (f && !resolved.some(r => r.name === n)) resolved.push({ name: n, driveId: f, thumb: 'https://lh3.googleusercontent.com/d/' + f + '=w1600' });
-    else if (!f && missing.indexOf(n) < 0) missing.push(n);
+    const f = pick(n);
+    if (f) add(f); else if (missing.indexOf(n) < 0) missing.push(n);
   });
+  Object.keys(local).sort().forEach(k => add(local[k]));
+  post.cover = post.cover && pick(post.cover) ? pick(post.cover).name : (resolved[0] ? resolved[0].name : '');
   post.photos = resolved;
-  if (missing.length) post.warnings.push(missing.length + ' foto(s) referida(s) no Doc não estão na pasta pública de fotos');
+  if (missing.length && !Object.keys(local).length) post.warnings.push(missing.length + ' foto(s) referida(s) no Doc não estão na pasta pública de fotos');
+  if (!resolved.length) post.warnings.push('Sem fotos: a pasta deste mês em "Blog - fotos aprovadas" está vazia');
   delete post.docTitle;
   return post;
 }
@@ -207,16 +212,16 @@ function slugify_(t) {
 }
 
 // Uma subpasta por artigo, com o mês no nome ("2026-05 Maio" ou "Maio 2026").
-// As fotos de cada artigo procuram-se primeiro na pasta do seu mês; as soltas servem a todos.
+// Todas as fotos da pasta do mês entram no artigo; as soltas na raiz só entram se o Doc as nomear.
 function indexImages_(folder, index, key) {
   index = index || { all: {}, byMonth: {} };
   const files = folder.getFiles();
   while (files.hasNext()) {
     const f = files.next();
     if (!/^image\//.test(f.getMimeType())) continue;
-    const name = f.getName().toLowerCase();
-    if (key) (index.byMonth[key] = index.byMonth[key] || {})[name] = f.getId();
-    if (!index.all[name]) index.all[name] = f.getId();
+    const img = { name: f.getName(), id: f.getId() }, lower = img.name.toLowerCase();
+    if (key) (index.byMonth[key] = index.byMonth[key] || {})[lower] = img;
+    if (!index.all[lower]) index.all[lower] = img;
   }
   const subs = folder.getFolders();
   while (subs.hasNext()) { const sub = subs.next(); indexImages_(sub, index, folderKey_(sub.getName()) || key); }
