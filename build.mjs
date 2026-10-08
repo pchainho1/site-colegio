@@ -11,7 +11,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 
-const SITE = (process.env.SITE_URL || 'https://novo.colegio-falcao.com').replace(/\/$/, '');
+const SITE = (process.env.SITE_URL || 'https://novo.parque-falcao.com').replace(/\/$/, '');
 // Só conta se for um endereço https/http; qualquer outro valor (ou nada) usa feed.sample.json
 const FEED_URL = /^https?:\/\//.test(process.env.FEED_URL || '') ? process.env.FEED_URL : undefined;
 const PHOTO_DIR = process.env.PHOTO_DIR;
