@@ -48,7 +48,11 @@ function publicView_(feed, debug) {
 function testFeed() {
   const feed = buildFeed_();
   Logger.log('%s artigos, %s ignorados', feed.posts.length, feed.ignored.length);
-  feed.posts.forEach(p => Logger.log('%s | %s | %s avisos', p.month, p.title, p.warnings.length));
+  feed.posts.forEach(p => {
+    Logger.log('%s | %s | %s', p.month, p.status === 'hold' ? 'EM ESPERA (não publicado)' : 'publicado', p.title);
+    p.warnings.forEach(w => Logger.log('    aviso: %s', w));
+  });
+  feed.ignored.forEach(d => Logger.log('ignorado (%s): %s', d.why, d.name));
 }
 
 /* ---------- 1. escolher os Docs ---------- */
