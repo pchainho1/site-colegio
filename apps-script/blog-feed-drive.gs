@@ -145,7 +145,7 @@ function parseDoc_(file, key, images) {
   // fotos: cruzar nomes do Doc com ficheiros reais do Drive
   const resolved = [], missing = [];
   [post.cover].concat(post.photos).filter(Boolean).forEach(n => {
-    const f = images[n.toLowerCase()];
+    const f = (images.byMonth[key] || {})[n.toLowerCase()] || images.all[n.toLowerCase()];
     if (f && !resolved.some(r => r.name === n)) resolved.push({ name: n, driveId: f, thumb: 'https://lh3.googleusercontent.com/d/' + f + '=w1600' });
     else if (!f && missing.indexOf(n) < 0) missing.push(n);
   });
@@ -202,16 +202,26 @@ function slugify_(t) {
   return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
 }
 
-function indexImages_(folder, map) {
-  map = map || {};
+// Uma subpasta por artigo, com o mês no nome ("2026-05 Maio" ou "Maio 2026").
+// As fotos de cada artigo procuram-se primeiro na pasta do seu mês; as soltas servem a todos.
+function indexImages_(folder, index, key) {
+  index = index || { all: {}, byMonth: {} };
   const files = folder.getFiles();
   while (files.hasNext()) {
     const f = files.next();
-    if (/^image\//.test(f.getMimeType())) map[f.getName().toLowerCase()] = f.getId();
+    if (!/^image\//.test(f.getMimeType())) continue;
+    const name = f.getName().toLowerCase();
+    if (key) (index.byMonth[key] = index.byMonth[key] || {})[name] = f.getId();
+    if (!index.all[name]) index.all[name] = f.getId();
   }
   const subs = folder.getFolders();
-  while (subs.hasNext()) indexImages_(subs.next(), map);
-  return map;
+  while (subs.hasNext()) { const sub = subs.next(); indexImages_(sub, index, folderKey_(sub.getName()) || key); }
+  return index;
+}
+
+function folderKey_(name) {
+  const m = name.match(/^(20\d\d)-(0[1-9]|1[0-2])\b/);
+  return m ? m[1] + '-' + m[2] : monthKey_(name);
 }
 
 /* ---------- 4. reconstruir o site quando algo muda ---------- */
