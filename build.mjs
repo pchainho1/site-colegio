@@ -12,7 +12,8 @@ import path from 'node:path';
 import sharp from 'sharp';
 
 const SITE = (process.env.SITE_URL || 'https://novo.colegio-falcao.com').replace(/\/$/, '');
-const FEED_URL = process.env.FEED_URL;
+// Só conta se for um endereço https/http; qualquer outro valor (ou nada) usa feed.sample.json
+const FEED_URL = /^https?:\/\//.test(process.env.FEED_URL || '') ? process.env.FEED_URL : undefined;
 const PHOTO_DIR = process.env.PHOTO_DIR;
 const FORM = 'https://forms.gle/5s2jkXaq54pBxrhg6';
 const WIDTHS = [640, 1200, 1800];
