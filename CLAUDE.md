@@ -11,7 +11,8 @@ Fotos do blog podem estar numa pasta pública do Drive.
 ## Arquitetura (decidida)
 Google Docs (privados) -> Apps Script (`apps-script/blog-feed-drive.gs`) publica feed JSON
 -> `build.mjs` descarrega e otimiza fotos (WebP 640/1200/1800), gera HTML estático em `dist/`
--> Cloudflare (Workers Builds + static assets, ver `wrangler.jsonc`) -> subdomínio, p. ex. novo.colegio-falcao.com.
+-> Cloudflare (Workers Builds + static assets, ver `wrangler.jsonc`) -> subdomínio novo.parque-falcao.com
+(o domínio colegio-falcao.com está noutra conta Cloudflare, gerida pelo atual alojamento do site; parque-falcao.com está na conta do Paulo).
 O visitante nunca fala com o Drive nem com o Apps Script.
 
 ## Ids do Drive
