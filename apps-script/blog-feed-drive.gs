@@ -17,7 +17,7 @@
 
 const CONFIG = {
   FOLDER_ID: '1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa',   // Docs (privada)
-  PUBLIC_PHOTOS_FOLDER_ID: 'COLE_AQUI_O_ID_DA_PASTA_PUBLICA_DE_FOTOS', // só fotos aprovadas, "qualquer pessoa com o link"
+  PUBLIC_PHOTOS_FOLDER_ID: '1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx', // só fotos aprovadas, "qualquer pessoa com o link"
   MIN_CHARS: 1500,            // abaixo disto o Doc conta como vazio
   CACHE_SECONDS: 600,
   HOLD_IF_CONSENT_NOTE: true  // artigos com nota sobre autorização de imagem ficam "em espera"

@@ -18,7 +18,9 @@ O visitante nunca fala com o Drive nem com o Apps Script.
 ## Ids do Drive
 - Pasta dos Docs do blog (privada): 1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa
 - Pasta de fotos de maio (privada): 1tIHe0VxAKeSyDGdBf3eMGQQ4yM56kze1
-- Pasta pública de fotos aprovadas: AINDA POR CRIAR (preencher PUBLIC_PHOTOS_FOLDER_ID no .gs)
+- Pasta pública de fotos aprovadas: 1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx ("Blog - fotos aprovadas", dentro da pasta "público"
+  do drive pessoal do Paulo, já partilhada com qualquer pessoa com o link). NÃO usar a unidade partilhada:
+  tem muitos membros, incluindo uma empresa externa com conta interna. Só copiar para lá fotos com autorização de imagem.
 
 ## Convenções dos Docs (confirmadas nos 20 Docs existentes -> 8 artigos, nov 2025 a jun 2026)
 - Um artigo por mês; título do Doc com mês e ano. Vence a versão editada por último.
