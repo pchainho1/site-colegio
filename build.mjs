@@ -10,12 +10,14 @@
  *   FEED_KEY   chave partilhada com o Apps Script (Propriedades do script > FEED_KEY); guardar como secret
  *   SITE_URL   endereço final do site (para canonical, sitemap e partilha)
  *   PHOTO_DIR  pasta local com fotos (só para testes, evita descarregar)
+ *   (os textos, fotos e PDFs das páginas também vêm do Drive pelo mesmo Apps Script: pasta "Site do colégio")
  *   CF_BEACON_TOKEN  token do Cloudflare Web Analytics (estatísticas sem cookies); sem ele não há estatísticas
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { PurgeCSS } from 'purgecss';
+import { parse } from 'node-html-parser';
 
 const SITE = (process.env.SITE_URL || 'https://novo.parque-falcao.com').replace(/\/$/, '');
 // Só conta se for um endereço https/http; qualquer outro valor (ou nada) usa feed.sample.json
@@ -173,7 +175,69 @@ const switchLang = (html, url) => {
     // links partidos do site atual nas páginas EN (sem o prefixo /en)
     .replace(/href="\/(educational-offering|our-school)\//g, 'href="/en/$1/').replace('href="/en/educational-offering/1st-cycle"', 'href="/en/educational-offering/primary"');
 };
-const finish = (html, url) => switchLang(showBody(eagerFirst(embedMap(html))), url).replace('</body>', BEACON + '</body>').replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
+/* ---------- conteúdo editável no Google Drive (pasta "Site do colégio") ---------- */
+// site/content.json (tools/mark-content.mjs) diz que textos (data-t) e fotos (data-f) são editáveis e que PDFs existem.
+// O Apps Script devolve o que está no Drive; aqui só se aplica o que mudou em relação ao site importado.
+const CONTENT = JSON.parse(await fs.readFile('site/content.json', 'utf8'));
+const textChanges = new Map();   // id -> texto novo
+const imgChanges = new Map();    // /img/x.webp -> /img/x-<versão>.webp
+const textHtml = t => esc(t).replace(/\n/g, '<br>');
+
+async function loadDriveContent() {
+  if (!FEED_URL) return;
+  let live;
+  try { live = await fromScript({ site: '1' }); } catch (e) { return console.warn('  conteúdo do Drive indisponível:', e.message); }
+  if (!live.texts) return console.log('  pasta "Site do colégio" ainda não preparada no Apps Script');
+  const original = new Map(CONTENT.docs.flatMap(d => [...d.pt.texts, ...d.en.texts]).map(t => [t.id, t.text]));
+  for (const [id, t] of Object.entries(live.texts)) {
+    const v = String(t).replace(/\r/g, '').split('\n').map(l => l.trim()).join('\n').trim();
+    if (original.has(id) && v && v !== original.get(id)) textChanges.set(id, v);
+  }
+  for (const [id, f] of Object.entries(live.photos || {})) {
+    const slot = CONTENT.photos[id];
+    if (!slot || f.original) continue;
+    try {
+      const buf = Buffer.from((await fromScript({ file: f.fileId })).data, 'base64');
+      const tag = f.fileId.slice(-8).toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const u of slot.variants) {
+        const { width, height } = await sharp(path.join('site', u)).metadata();   // mesmo tamanho e corte da original
+        const nu = u.replace(/\.webp$/, `-${tag}.webp`);
+        await sharp(buf).rotate().resize(width, height, { fit: 'cover' }).webp({ quality: 78 }).toFile(path.join('dist', nu));
+        imgChanges.set(u, nu);
+      }
+    } catch (e) { console.warn(`  foto ${id} ignorada: ${e.message}`); }
+  }
+  for (const d of CONTENT.documents) {
+    const f = (live.documents || {})[d.name];
+    if (!f || f.original) continue;
+    try { await fs.writeFile(path.join('dist', d.url), Buffer.from((await fromScript({ file: f.fileId })).data, 'base64')); }
+    catch (e) { console.warn(`  documento ${d.name} ignorado: ${e.message}`); }
+  }
+  console.log(`Drive: ${textChanges.size} texto(s), ${new Set([...imgChanges.keys()].map(u => Object.keys(CONTENT.photos).find(k => CONTENT.photos[k].variants.includes(u)))).size} foto(s) e ${CONTENT.documents.filter(d => live.documents?.[d.name] && !live.documents[d.name].original).length} documento(s) alterados`);
+}
+
+function applyDrive(html) {
+  if (textChanges.size && /data-t="/.test(html)) {
+    const ids = [...html.matchAll(/data-t="([^"]+)"/g)].map(m => m[1]).filter(id => textChanges.has(id));
+    if (ids.length) {
+      const root = parse(html, { comment: true });
+      for (const id of new Set(ids)) for (const e of root.querySelectorAll(`[data-t="${id}"]`)) e.set_content(textHtml(textChanges.get(id)));
+      html = root.toString();
+    }
+  }
+  for (const [a, b] of imgChanges) html = html.split(a).join(b);
+  return html;
+}
+
+// manifesto público para o Apps Script preparar a pasta do Drive (textos atuais, fotos e PDFs a copiar)
+async function writeManifest() {
+  const largest = async urls => { let best; for (const u of urls) { const m = await sharp(path.join('site', u)).metadata(); if (!best || m.width > best.w) best = { u, w: m.width }; } return best.u; };
+  const photos = [];
+  for (const [id, p] of Object.entries(CONTENT.photos)) photos.push({ id, page: p.page, alt: p.alt, url: await largest(p.variants) });
+  await write('site-content.json', JSON.stringify({ docs: CONTENT.docs.map(d => ({ title: d.title, pt: d.pt.texts, en: d.en.texts })), photos, documents: CONTENT.documents }));
+}
+
+const finish = (html, url) => switchLang(showBody(eagerFirst(embedMap(applyDrive(html)))), url).replace('</body>', BEACON + '</body>').replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
   .replace(/content="\/img\//g, `content="${SITE}/img/`);
 
 /* ---------- blog ---------- */
@@ -202,6 +266,8 @@ async function main() {
   await fs.copyFile('node_modules/jquery/dist/jquery.min.js', 'dist/assets/jquery.min.js');
 
   // artigos: os importados (site antigo) + os do Drive depois de ARCHIVE_UNTIL
+  await loadDriveContent();
+  await writeManifest();
   const archive = JSON.parse(await read('posts.json'));
   const feed = (await loadFeed()).filter(p => p.sort > ARCHIVE_UNTIL);
   console.log(`${feed.length} artigo(s) novos do Drive`);
@@ -264,7 +330,7 @@ async function main() {
     .filter(u => u !== '/404').concat(fromFeed.flatMap(p => [p.href, '/en' + p.href]));
   await write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${[...new Set(urls)].map(u => `<url><loc>${SITE}${u}</loc></url>`).join('')}</urlset>`);
   await write('robots.txt', `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-  await write('_headers', `/img/*\n  Cache-Control: public, max-age=31536000, immutable\n/storage/*\n  Cache-Control: public, max-age=31536000, immutable\n/themes/*\n  Cache-Control: public, max-age=604800\n/assets/*\n  Cache-Control: public, max-age=604800\n/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n`);
+  await write('_headers', `/img/*\n  Cache-Control: public, max-age=31536000, immutable\n/storage/app/uploads/*\n  Cache-Control: public, max-age=31536000, immutable\n/storage/app/media/*\n  Cache-Control: public, max-age=3600\n/themes/*\n  Cache-Control: public, max-age=604800\n/assets/*\n  Cache-Control: public, max-age=604800\n/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n`);
   // CSS: Bootstrap + tema reduzidos ao que as páginas e o JavaScript usam, e postos dentro de cada página
   // (evita 360 KB de CSS a bloquear a primeira pintura)
   const html = []; await (async function walkDist(d) { for (const e of await fs.readdir(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) await walkDist(f); else if (f.endsWith('.html')) html.push(f); } })('dist');

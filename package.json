@@ -10,5 +10,8 @@
     "jquery": "3.6.0",
     "purgecss": "^6.0.0",
     "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "node-html-parser": "^6.1.13"
   }
 }

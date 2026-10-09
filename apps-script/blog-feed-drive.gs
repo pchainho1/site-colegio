@@ -33,6 +33,8 @@ function doGet(e) {
   // Sem a chave certa não se entrega nada (a chave está em Propriedades do script > FEED_KEY e na Cloudflare)
   const key = PropertiesService.getScriptProperties().getProperty('FEED_KEY');
   if (!key || q.key !== key) return json_({ error: 'acesso negado' });
+  if (q.site) return json_(siteContent_());          // textos, fotos e documentos da pasta "Site do colégio"
+  if (q.file) return json_(siteFile_(q.file));        // uma foto ou PDF dessa pasta (nunca outro ficheiro)
   const body = feedJson_(q.refresh === '1');
   if (q.photo) return json_(photo_(q.photo, JSON.parse(body)));
   return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
@@ -276,7 +278,7 @@ function checkAndTriggerBuild() {
   const props = PropertiesService.getScriptProperties();
   const hook = props.getProperty('BUILD_HOOK_URL');
   if (!hook) { Logger.log('Falta BUILD_HOOK_URL nas Propriedades do script.'); return; }
-  const posts = publicView_(buildFeed_(), false).posts;
+  const posts = { blog: publicView_(buildFeed_(), false).posts, site: siteContent_() };
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(posts), Utilities.Charset.UTF_8);
   const hash = Utilities.base64Encode(digest);
   if (hash === props.getProperty('LAST_BUILD_HASH')) { Logger.log('Sem alterações: não é preciso reconstruir.'); return; }
@@ -294,4 +296,107 @@ function instalarAcionador() {
   if (!existe) ScriptApp.newTrigger('checkAndTriggerBuild').timeBased().everyMinutes(15).create();
   Logger.log(existe ? 'O acionador já existia.' : 'Acionador criado: checkAndTriggerBuild a cada 15 minutos.');
   checkAndTriggerBuild();
+}
+
+/* ---------- 5. conteúdo do site: pasta "Site do colégio" ---------- */
+/**
+ * Textos, fotos e documentos (regulamentos, projetos, ementas) das páginas do site, editáveis no Drive:
+ *   Site do colégio/
+ *     Textos/      um Google Doc por página, com duas tabelas (Português e English): Onde | Texto
+ *     Fotos/       uma subpasta por página; cada foto tem um nome fixo (ex.: o-colegio-f03.webp)
+ *     Documentos/  os PDFs ligados no site (ex.: Ementa Sala 2 anos.pdf)
+ * Para mudar um texto: editar a coluna "Texto" (não mexer na coluna "Onde").
+ * Para trocar uma foto ou um PDF: carregar o novo ficheiro com o MESMO nome (a extensão pode mudar, ex.: .jpg).
+ * Se houver vários com o mesmo nome, vale o mais recente.
+ *
+ * Executar prepararPastaDoSite() uma vez: cria a pasta no seu drive (privada) e copia para lá os textos,
+ * fotos e PDFs que estão hoje no site. Se o tempo de execução acabar, execute outra vez: continua onde parou.
+ */
+const SITE_URL = 'https://novo.parque-falcao.com';
+
+function prepararPastaDoSite() {
+  const t0 = Date.now(), props = PropertiesService.getScriptProperties();
+  const manifest = JSON.parse(UrlFetchApp.fetch(SITE_URL + '/site-content.json').getContentText());
+  let root = props.getProperty('SITE_FOLDER_ID') && DriveApp.getFolderById(props.getProperty('SITE_FOLDER_ID'));
+  if (!root) { root = DriveApp.createFolder('Site do colégio'); props.setProperty('SITE_FOLDER_ID', root.getId()); }
+  const sub = (parent, name) => { const it = parent.getFoldersByName(name); return it.hasNext() ? it.next() : parent.createFolder(name); };
+  const has = (folder, name) => folder.getFilesByName(name).hasNext();
+  const tooLong = () => Date.now() - t0 > 5 * 60 * 1000;
+
+  // 1. Textos: um Doc por página
+  const textos = sub(root, 'Textos');
+  manifest.docs.forEach(d => {
+    const name = 'Textos — ' + d.title;
+    if (has(textos, name)) return;
+    const doc = DocumentApp.create(name), body = doc.getBody();
+    body.appendParagraph(d.title).setHeading(DocumentApp.ParagraphHeading.TITLE);
+    body.appendParagraph('Edite só a coluna "Texto". Não altere a coluna "Onde": é ela que diz ao site onde fica cada texto. ' +
+      'As alterações aparecem no site cerca de 15 minutos depois.').setItalic(true);
+    [['Português', d.pt], ['English', d.en]].forEach(([lang, rows]) => {
+      if (!rows.length) return;
+      body.appendParagraph(lang).setHeading(DocumentApp.ParagraphHeading.HEADING1).setItalic(false);
+      const table = body.appendTable([['Onde', 'Texto']].concat(rows.map(r => [r.label + ' · ' + r.id, r.text])));
+      table.getRow(0).editAsText().setBold(true);
+      for (let i = 0; i < table.getNumRows(); i++) table.getRow(i).getCell(0).setWidth(150).editAsText().setFontSize(8).setForegroundColor(i ? '#777777' : '#000000');
+    });
+    body.getChild(0).getType() === DocumentApp.ElementType.PARAGRAPH && body.getChild(0).asParagraph().getText() === '' && body.removeChild(body.getChild(0));
+    doc.saveAndClose();
+    DriveApp.getFileById(doc.getId()).moveTo(textos);
+  });
+
+  // 2. Documentos (PDF)
+  const docs = sub(root, 'Documentos');
+  for (const d of manifest.documents) {
+    if (tooLong()) return Logger.log('Tempo quase esgotado: execute prepararPastaDoSite() outra vez para continuar.');
+    if (has(docs, d.name)) continue;
+    const blob = UrlFetchApp.fetch(SITE_URL + encodeURI(d.url)).getBlob().setName(d.name);
+    docs.createFile(blob).setDescription('original');
+  }
+
+  // 3. Fotos, por página
+  const fotos = sub(root, 'Fotos');
+  for (const p of manifest.photos) {
+    if (tooLong()) return Logger.log('Tempo quase esgotado: execute prepararPastaDoSite() outra vez para continuar.');
+    const folder = sub(fotos, p.page), name = p.id + '.webp';
+    if (has(folder, name)) continue;
+    const blob = UrlFetchApp.fetch(SITE_URL + p.url).getBlob().setName(name);
+    folder.createFile(blob).setDescription('original' + (p.alt ? ' — ' + p.alt : ''));
+  }
+  Logger.log('Pasta "Site do colégio" pronta: ' + root.getUrl());
+}
+
+// original = ficheiro copiado do site e não substituído depois (uma versão nova muda a data de alteração)
+function isOriginal_(f) { return /^original/.test(f.getDescription() || '') && f.getLastUpdated() - f.getDateCreated() < 60000; }
+
+function siteContent_(withTexts) {
+  if (withTexts === undefined) withTexts = true;
+  const id = PropertiesService.getScriptProperties().getProperty('SITE_FOLDER_ID');
+  if (!id) return {};
+  const root = DriveApp.getFolderById(id), out = { texts: {}, photos: {}, documents: {} };
+  const each = (it, fn) => { while (it.hasNext()) fn(it.next()); };
+  const newest = (map, k, f) => { if (!map[k] || f.getLastUpdated() > map[k]._t) map[k] = { fileId: f.getId(), original: isOriginal_(f), updated: f.getLastUpdated().toISOString(), _t: f.getLastUpdated() }; };
+  if (withTexts) each(root.getFoldersByName('Textos'), folder => each(folder.getFilesByType(MimeType.GOOGLE_DOCS), file => {
+    DocumentApp.openById(file.getId()).getBody().getTables().forEach(t => {
+      for (let i = 1; i < t.getNumRows(); i++) {
+        const row = t.getRow(i); if (row.getNumCells() < 2) continue;
+        const m = row.getCell(0).getText().match(/([a-z0-9_]+-t\d+)\s*$/);
+        if (m) out.texts[m[1]] = row.getCell(1).getText();
+      }
+    });
+  }));
+  each(root.getFoldersByName('Fotos'), fotos => each(fotos.getFolders(), folder => each(folder.getFiles(), f => {
+    if (/^image\//.test(f.getMimeType())) newest(out.photos, f.getName().replace(/\.[^.]+$/, ''), f);
+  })));
+  each(root.getFoldersByName('Documentos'), folder => each(folder.getFiles(), f => newest(out.documents, f.getName(), f)));
+  [out.photos, out.documents].forEach(m => Object.keys(m).forEach(k => delete m[k]._t));
+  return out;
+}
+
+// Só entrega ficheiros que estão na pasta "Site do colégio" (fotos e documentos); nunca outro ficheiro do Drive.
+function siteFile_(fileId) {
+  const c = siteContent_(false);
+  const ok = [c.photos, c.documents].some(m => m && Object.keys(m).some(k => m[k].fileId === fileId));
+  if (!ok) return { error: 'ficheiro fora da pasta do site' };
+  const blob = DriveApp.getFileById(fileId).getBlob();
+  return { name: blob.getName(), mime: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };
 }

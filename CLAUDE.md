@@ -31,6 +31,13 @@ colegio-falcao.com). Páginas EN passam a ter lang="en" (no site atual estavam c
 Troca de idioma: no site atual era um pedido ao servidor do CMS ("onSwitchLocale"); aqui o botão abre a página
 equivalente (pares PT/EN aprendidos dos menus das páginas iniciais; blog: /blog/... <-> /en/blog/...), com
 <link rel="alternate" hreflang>. Os links partidos das páginas EN (sem /en) são corrigidos no build.
+Conteúdo editável no Drive (pasta "Site do colégio", privada, drive pessoal do Paulo; id em SITE_FOLDER_ID nas Propriedades
+do script): Textos/ (um Google Doc por página, tabelas Português e English: Onde | Texto), Fotos/<página>/ (nome fixo por
+foto, ex. o-colegio-f03.webp) e Documentos/ (PDFs: regulamentos, projetos, ementas). Trocar = carregar ficheiro com o mesmo
+nome (vale o mais recente). `tools/mark-content.mjs` (correr depois do import) marca data-t/data-f nas páginas e escreve
+site/content.json; o build publica /site-content.json (manifesto para `prepararPastaDoSite()` no Apps Script) e aplica só o
+que mudou: textos, fotos (variantes com os mesmos tamanhos/cortes, nome novo por causa da cache) e PDFs (mesmo endereço).
+O Apps Script entrega com a chave: ?site=1 (conteúdo) e ?file=<id> (só ficheiros dessa pasta). O blog continua à parte.
 Estatísticas: Cloudflare Web Analytics (sem cookies, sem aviso), ligado pela variável CF_BEACON_TOKEN; sem Google Analytics.
 
 ## Ids do Drive
@@ -66,7 +73,8 @@ NÃO testado: o .gs no Apps Script, descarga de fotos reais via lh3.googleuserco
    -> executar `instalarAcionador()` uma vez (acionador de 15 min para `checkAndTriggerBuild`, só reconstrói se algo mudou).
 5. Redirecionamentos: já não são precisos (os endereços são os mesmos do site atual).
 6. Medir desempenho (PageSpeed): feito, ver abaixo.
-7. Ainda não feito: assistente "Pergunte ao Falcão".
+7. Pasta "Site do colégio": colar o .gs novo, executar prepararPastaDoSite() (repetir se o tempo acabar) e publicar nova versão.
+8. Ainda não feito: assistente "Pergunte ao Falcão".
 
 ## Desempenho medido (PageSpeed, telemóvel, página inicial)
 Site atual: FCP 1,4 s, LCP 5,3 s, TBT 0, CLS 0,004, SI 2,5 s.
@@ -80,5 +88,6 @@ Logótipo: mosaico de quartos de círculo, usado nas capas sem foto.
 
 ## Como testar
     npm install
+    # depois de voltar a importar o site atual: node tools/mark-content.mjs
     PHOTO_DIR=/caminho/fotos node build.mjs   # ou sem PHOTO_DIR para descarregar do Drive
     python3 -m http.server -d dist
