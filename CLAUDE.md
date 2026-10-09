@@ -6,10 +6,11 @@ reconstruir o site colegio-falcao.com. Responder sempre em português de Portuga
 ## Objetivo
 Nova versão do site com blog alimentado por texto e fotos de uma pasta partilhada do Google Drive.
 Requisito firme: desempenho igual ou melhor ao do site atual (medir ambos no PageSpeed Insights).
-Fotos do blog podem estar numa pasta pública do Drive.
+Fotos do blog numa pasta privada do Drive; o Apps Script entrega-as ao build (nunca públicas).
 
 ## Arquitetura (decidida)
-Google Docs (privados) -> Apps Script (`apps-script/blog-feed-drive.gs`) publica feed JSON
+Google Docs (privados) -> Apps Script (`apps-script/blog-feed-drive.gs`, Aplicação Web protegida por chave FEED_KEY)
+entrega o feed JSON e as fotos (`?photo=<id>`, só fotos de artigos publicados)
 -> `build.mjs` descarrega e otimiza fotos (WebP 640/1200/1800), gera HTML estático em `dist/`
 -> Cloudflare (Workers Builds + static assets, ver `wrangler.jsonc`) -> subdomínio novo.parque-falcao.com
 (o domínio colegio-falcao.com está noutra conta Cloudflare, gerida pelo atual alojamento do site; parque-falcao.com está na conta do Paulo).
@@ -18,11 +19,12 @@ O visitante nunca fala com o Drive nem com o Apps Script.
 ## Ids do Drive
 - Pasta dos Docs do blog (privada): 1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa
 - Pasta de fotos de maio (privada): 1tIHe0VxAKeSyDGdBf3eMGQQ4yM56kze1
-- Pasta pública de fotos aprovadas: 1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx ("Blog - fotos aprovadas", dentro da pasta "público"
-  do drive pessoal do Paulo, já partilhada com qualquer pessoa com o link). NÃO usar a unidade partilhada:
+- Pasta de fotos aprovadas: 1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx ("Blog - fotos aprovadas", no drive pessoal do Paulo).
+  Deve ser PRIVADA (tirar da pasta "público", que é partilhada com qualquer pessoa com o link). NÃO usar a unidade partilhada:
   tem muitos membros, incluindo uma empresa externa com conta interna. Só copiar para lá fotos com autorização de imagem.
   Uma subpasta por artigo, com o mês no início do nome ("2026-05 Maio"; já criadas de 2025-11 a 2026-06).
-  O .gs procura as fotos de cada artigo primeiro na pasta do seu mês; fotos soltas na raiz servem a todos.
+  Todas as fotos da pasta do mês entram no artigo (por ordem do nome); as nomeadas no Doc vêm primeiro e a capa é a
+  do Doc ou, sem ela, a primeira por nome (ex.: "00-..."). Fotos soltas na raiz só entram se o Doc as nomear.
 
 ## Convenções dos Docs (confirmadas nos 20 Docs existentes -> 8 artigos, nov 2025 a jun 2026)
 - Um artigo por mês; título do Doc com mês e ano. Vence a versão editada por último.
@@ -39,8 +41,10 @@ NÃO testado: o .gs no Apps Script, descarga de fotos reais via lh3.googleuserco
 
 ## Pendente
 1. Repositório GitHub com estes ficheiros na raiz; ligar à Cloudflare (build: `npm ci && node build.mjs`, deploy: `npx wrangler deploy`, NODE_VERSION=20).
-2. Implementar o .gs como Aplicação Web (executar como Paulo, acesso a qualquer pessoa) e pôr o URL (+ ?refresh=1) em FEED_URL.
-3. Criar a pasta pública de fotos (o administrador tem de permitir partilha externa) e confirmar autorizações de imagem antes de mover fotos para lá.
+2. Implementar o .gs como Aplicação Web (executar como Paulo, acesso a qualquer pessoa; criarChave() uma vez) e pôr na Cloudflare
+   FEED_URL (URL /exec) e FEED_KEY (secret). O código do .gs é copiado à mão para o editor (decisão: sem clasp, para não guardar
+   credenciais da conta de administrador do Paulo).
+3. Tornar privada a pasta de fotos aprovadas e confirmar autorizações de imagem antes de copiar fotos para lá.
 4. Deploy hook + BUILD_HOOK_URL no Apps Script + acionador de 15 min para `checkAndTriggerBuild`.
 5. Redirecionamentos dos endereços do site atual (`_redirects`): pedir a Paulo a lista de URLs atuais do blog.
 6. Medir desempenho (PageSpeed) do site atual e do novo.

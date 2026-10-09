@@ -3,7 +3,8 @@
  * Lê o feed do blog (Apps Script), descarrega e otimiza as fotos e escreve tudo em dist/.
  *
  * Variáveis de ambiente
- *   FEED_URL   URL da Aplicação Web do blog-feed-drive.gs (sem ela usa feed.sample.json)
+ *   FEED_URL   URL da Aplicação Web do blog-feed-drive.gs, terminado em /exec (sem ela usa feed.sample.json)
+ *   FEED_KEY   chave partilhada com o Apps Script (Propriedades do script > FEED_KEY); guardar como secret
  *   SITE_URL   endereço final do site (para canonical, sitemap e partilha)
  *   PHOTO_DIR  pasta local com fotos (só para testes, evita descarregar)
  */
@@ -14,6 +15,7 @@ import sharp from 'sharp';
 const SITE = (process.env.SITE_URL || 'https://novo.parque-falcao.com').replace(/\/$/, '');
 // Só conta se for um endereço https/http; qualquer outro valor (ou nada) usa feed.sample.json
 const FEED_URL = /^https?:\/\//.test(process.env.FEED_URL || '') ? process.env.FEED_URL : undefined;
+const FEED_KEY = process.env.FEED_KEY || '';
 const PHOTO_DIR = process.env.PHOTO_DIR;
 const FORM = 'https://forms.gle/5s2jkXaq54pBxrhg6';
 const WIDTHS = [640, 1200, 1800];
@@ -24,13 +26,23 @@ const mins = p => Math.max(1, Math.round(words(p) / 190)) + ' min de leitura';
 const clip = (t, n) => t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t;
 
 /* ---------- dados ---------- */
+// Pedido ao Apps Script com a chave; o feed é sempre regenerado (refresh=1), as fotos não
+async function fromScript(params) {
+  const u = new URL(FEED_URL);
+  u.searchParams.delete('refresh');
+  if (FEED_KEY) u.searchParams.set('key', FEED_KEY);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  const r = await fetch(u, { redirect: 'follow' });
+  if (!r.ok) throw new Error('Apps Script indisponível: HTTP ' + r.status);
+  const data = await r.json();
+  if (data.error) throw new Error('Apps Script: ' + data.error + (data.error === 'acesso negado' ? ' (verifique FEED_KEY)' : ''));
+  return data;
+}
+
 async function loadFeed() {
   let data;
-  if (FEED_URL) {
-    const r = await fetch(FEED_URL, { redirect: 'follow' });
-    if (!r.ok) throw new Error('Feed indisponível: ' + r.status);
-    data = await r.json();
-  } else data = JSON.parse(await fs.readFile('feed.sample.json', 'utf8'));
+  if (FEED_URL) data = await fromScript({ refresh: '1' });
+  else data = JSON.parse(await fs.readFile('feed.sample.json', 'utf8'));
   return data.posts.filter(p => p.status === 'published').sort((a, b) => b.sort.localeCompare(a.sort));
 }
 
@@ -39,9 +51,13 @@ async function getBuffer(f) {
   if (PHOTO_DIR) { try { return await fs.readFile(path.join(PHOTO_DIR, f.name)); } catch {} }
   const cp = path.join('.cache', f.driveId + '.img');
   try { return await fs.readFile(cp); } catch {}
-  const r = await fetch(`https://lh3.googleusercontent.com/d/${f.driveId}=w2000`);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const b = Buffer.from(await r.arrayBuffer());
+  let b;
+  if (FEED_URL) b = Buffer.from((await fromScript({ photo: f.driveId })).data, 'base64');
+  else {
+    const r = await fetch(`https://lh3.googleusercontent.com/d/${f.driveId}=w2000`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    b = Buffer.from(await r.arrayBuffer());
+  }
   await fs.mkdir('.cache', { recursive: true }); await fs.writeFile(cp, b);
   return b;
 }
