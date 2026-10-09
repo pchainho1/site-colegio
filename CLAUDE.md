@@ -26,8 +26,9 @@ posto dentro de cada página, primeira imagem sem carregamento diferido, página
 Gera a listagem do blog (`/blog`, `/blog/pagina/N`, também `/en/...`) e as notícias da página inicial.
 Artigos do Drive só entram depois de `ARCHIVE_UNTIL` (2026-06), no modelo de artigo do site atual, em `/blog/default/<slug>`.
 Mesmos endereços do site atual (ex.: `/o-colegio`), por isso não são precisos redirecionamentos ao trocar o domínio.
-Mapa dos contactos: a chave do Google Maps só aceita colegio-falcao.com (no domínio novo dá erro até se trocar o domínio
-ou acrescentar o domínio à chave).
+Mapa dos contactos: mapa incorporado do Google (iframe, sem chave), em vez da API JS do site atual (chave restrita a
+colegio-falcao.com). Páginas EN passam a ter lang="en" (no site atual estavam como pt).
+Estatísticas: Cloudflare Web Analytics (sem cookies, sem aviso), ligado pela variável CF_BEACON_TOKEN; sem Google Analytics.
 
 ## Ids do Drive
 - Pasta dos Docs do blog (privada): 1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa
@@ -61,8 +62,13 @@ NÃO testado: o .gs no Apps Script, descarga de fotos reais via lh3.googleuserco
 4. Deploy hook (Cloudflare: Settings > Builds > Deploy Hooks, ramo main) -> BUILD_HOOK_URL nas Propriedades do script
    -> executar `instalarAcionador()` uma vez (acionador de 15 min para `checkAndTriggerBuild`, só reconstrói se algo mudou).
 5. Redirecionamentos: já não são precisos (os endereços são os mesmos do site atual).
-6. Medir desempenho (PageSpeed) do site atual e do novo.
-7. Ainda não feito: assistente "Pergunte ao Falcão". Google Analytics foi retirado (decidir se volta, com aviso de cookies).
+6. Medir desempenho (PageSpeed): feito, ver abaixo.
+7. Ainda não feito: assistente "Pergunte ao Falcão".
+
+## Desempenho medido (PageSpeed, telemóvel, página inicial)
+Site atual: FCP 1,4 s, LCP 5,3 s, TBT 0, CLS 0,004, SI 2,5 s.
+Site novo (novo.parque-falcao.com): FCP 1,2 s, LCP 2,0 s, TBT 0, CLS 0,01, SI 1,2 s, SEO 100.
+(Os endereços de pré-visualização *.workers.dev têm X-Robots-Tag: noindex da Cloudflare: SEO baixo é normal aí.)
 
 ## Marca
 Cores: #28066A (títulos), #3D09DD (botões), #6D3CEA, #25DBAE, #EDB92F, #F33340. Fonte da marca: Brown Std (licença web por
