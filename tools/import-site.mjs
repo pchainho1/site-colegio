@@ -81,7 +81,7 @@ function clean(html) {
       if (!/dataLayer|gtm\.start|gtag\(/.test(code)) pageJs += `<script data-pagina>document.addEventListener('DOMContentLoaded',function(){${code}\n});</script>`;
     return '';
   });
-  html = html.replace(/<\/body>/, pageJs + '</body>');
+  html = html.replace(/<\/body>/, '<!--PAGEJS--></body>');   // inseridos no fim, depois de tratar as imagens do HTML
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, s =>
     /application\/ld\+json|^<script data-pagina>/.test(s) ? s
       : /window\.BASE_URL/.test(s) ? s.replace(/"https:\/\/www\.colegio-falcao\.com\/"/g, 'location.origin')   // usado pelo JS do tema (BASE_URL + '/themes/...')
@@ -111,6 +111,12 @@ function clean(html) {
   // ficheiros já referidos com caminho relativo (ex.: ícones em /storage/app/media/icons)
   html = html.replace(/(href|src|data-src|data-srcset|srcset)="(\/(?:storage|themes|plugins)\/[^"]+)"/gi, (m, a, v) =>
     RESIZED.test(v) ? m : `${a}="${v.split(/,\s*/).map(x => { const [u, d] = x.trim().split(/\s+/); return addFile(BASE + u) + (d ? ' ' + d : ''); }).join(', ')}"`);
+  // endereços dentro dos scripts da página (ex.: fotos da janela dos espaços e da equipa)
+  pageJs = pageJs.replace(/'https:\/\/www\.colegio-falcao\.com(\/[^']+)'/g, (m, u) => {
+    if (RESIZED.test(u)) { const v = BASE + u; images.set(v, { name: imgName(v), convert: !/\.webp$/.test(v) }); return `'/img/${imgName(v)}'`; }
+    return /\.[a-z0-9]{2,5}$/i.test(u) ? `'${addFile(BASE + u)}'` : `'${u}'`;
+  });
+  html = html.replace('<!--PAGEJS-->', () => pageJs);
   // url(...) em estilos dentro da página (ex.: @font-face): caminho relativo e ficheiro copiado
   html = html.replace(/url\((['"]?)https:\/\/www\.colegio-falcao\.com(\/[^'")]+)\1\)/g, (m, q, u) => `url(${q}${addFile(BASE + u)}${q})`);
   return html;
