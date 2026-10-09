@@ -10,6 +10,7 @@
  *   FEED_KEY   chave partilhada com o Apps Script (Propriedades do script > FEED_KEY); guardar como secret
  *   SITE_URL   endereço final do site (para canonical, sitemap e partilha)
  *   PHOTO_DIR  pasta local com fotos (só para testes, evita descarregar)
+ *   CF_BEACON_TOKEN  token do Cloudflare Web Analytics (estatísticas sem cookies); sem ele não há estatísticas
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -139,7 +140,14 @@ function eagerFirst(html) {
 const NO_FOUC = '<style>' + ['.hero-slider', '.know-us-slider', '.facilities-slider', '.text-slider-holder', '.news-slider', '.testimonials-slider', '.post-image-container', '.photos-slider']
   .map(c => `${c}:not(.slick-initialized)>*+*`).join(',') + '{display:none}</style>';
 const showBody = html => html.replace(/<body\b([^>]*)>/, (m, attrs) => /class="/.test(attrs) ? `<body${attrs.replace(/class="/, 'class="loaded ')}>` : `<body${attrs} class="loaded">`);
-const finish = html => showBody(eagerFirst(html)).replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
+// Mapa dos contactos: mapa incorporado do Google (sem chave de API; a do site atual só aceita colegio-falcao.com).
+// Sem o elemento #map, o JavaScript do tema já não carrega a API do Google Maps.
+const embedMap = html => html.replace(/<div id="map" data-lat="([^"]+)" data-lon="([^"]+)"><\/div>/, (m, lat, lon) =>
+  `<iframe src="https://www.google.com/maps?q=${lat},${lon}&z=16&hl=${/<html lang="en"/.test(html) ? 'en' : 'pt-PT'}&output=embed" title="Mapa: Colégio Parque do Falcão" loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="border:0;width:100%;height:100%;display:block"></iframe>`);
+// Cloudflare Web Analytics: estatísticas sem cookies (não precisa de aviso de consentimento)
+const BEACON = /^[a-f0-9]{32}$/i.test(process.env.CF_BEACON_TOKEN || '')
+  ? `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"${process.env.CF_BEACON_TOKEN}"}'></script>` : '';
+const finish = html => showBody(eagerFirst(embedMap(html))).replace('</body>', BEACON + '</body>').replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
   .replace(/content="\/img\//g, `content="${SITE}/img/`);
 
 /* ---------- blog ---------- */
@@ -190,6 +198,7 @@ async function main() {
     const url = '/' + path.relative('site/pages', f).replace(/\.html$/, '').replace(/^index$/, '');
     let html = await fs.readFile(f, 'utf8');
     const lang = url.startsWith('/en') ? 'en' : 'pt';
+    if (lang === 'en') html = html.replace('<html lang="pt"', '<html lang="en"');   // o site atual marca as páginas EN como pt
     if (url === '/' || url === '/en') html = replaceDiv(html, '<div class="news-slider">', blog(lang).slice(0, NEWS_ON_HOME).map(p => newsCard(p, lang, true)).join(''));
     if (/^(\/en)?\/blog$/.test(url)) { tpl[lang + 'List'] = html; continue; }        // a listagem é gerada abaixo
     if (/\/blog\/default\//.test(url) && !tpl[lang + 'Post']) tpl[lang + 'Post'] = { html, slug: url.split('/').pop() };
