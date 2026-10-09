@@ -42,7 +42,12 @@ async function fromScript(params) {
 async function loadFeed() {
   let data;
   if (FEED_URL) data = await fromScript({ refresh: '1' });
-  else data = JSON.parse(await fs.readFile('feed.sample.json', 'utf8'));
+  else {
+    data = JSON.parse(await fs.readFile('feed.sample.json', 'utf8'));
+    // O feed de exemplo aponta para fotos reais ainda sem autorização confirmada: nunca as publicar.
+    // Só entram fotos com PHOTO_DIR (testes locais).
+    if (!PHOTO_DIR) data.posts.forEach(p => { p.photos = []; });
+  }
   return data.posts.filter(p => p.status === 'published').sort((a, b) => b.sort.localeCompare(a.sort));
 }
 
