@@ -21,8 +21,8 @@ O visitante nunca fala com o Drive nem com o Apps Script.
    - `FEED_KEY` = chave criada por `criarChave()` no Apps Script (guardar como *secret*)
    - `SITE_URL` = endereço final, ex.: https://novo.parque-falcao.com
 5. Domínio: no projeto, Settings > Domains & Routes > Add > Custom domain.
-6. Atualização automática: crie um deploy hook na hospedagem (se o painel o oferecer) e guarde-o
-   no Apps Script como `BUILD_HOOK_URL`; acionador de 15 min para `checkAndTriggerBuild`.
+6. Atualização automática: Settings > Builds > Deploy Hooks > criar hook para o ramo `main`; guardar o endereço no
+   Apps Script como `BUILD_HOOK_URL` (Propriedades do script) e executar `instalarAcionador()` uma vez.
 
 ## Notas
 - Fotos: a primeira construção descarrega tudo (cerca de 10 s por 20 fotos); as seguintes reutilizam a cache da hospedagem quando existir.

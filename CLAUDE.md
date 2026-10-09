@@ -58,7 +58,8 @@ NÃO testado: o .gs no Apps Script, descarga de fotos reais via lh3.googleuserco
    FEED_URL (URL /exec) e FEED_KEY (secret). O código do .gs é copiado à mão para o editor (decisão: sem clasp, para não guardar
    credenciais da conta de administrador do Paulo).
 3. Tornar privada a pasta de fotos aprovadas e confirmar autorizações de imagem antes de copiar fotos para lá.
-4. Deploy hook + BUILD_HOOK_URL no Apps Script + acionador de 15 min para `checkAndTriggerBuild`.
+4. Deploy hook (Cloudflare: Settings > Builds > Deploy Hooks, ramo main) -> BUILD_HOOK_URL nas Propriedades do script
+   -> executar `instalarAcionador()` uma vez (acionador de 15 min para `checkAndTriggerBuild`, só reconstrói se algo mudou).
 5. Redirecionamentos: já não são precisos (os endereços são os mesmos do site atual).
 6. Medir desempenho (PageSpeed) do site atual e do novo.
 7. Ainda não feito: assistente "Pergunte ao Falcão". Google Analytics foi retirado (decidir se volta, com aviso de cookies).
