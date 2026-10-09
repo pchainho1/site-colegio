@@ -28,6 +28,9 @@ Artigos do Drive só entram depois de `ARCHIVE_UNTIL` (2026-06), no modelo de ar
 Mesmos endereços do site atual (ex.: `/o-colegio`), por isso não são precisos redirecionamentos ao trocar o domínio.
 Mapa dos contactos: mapa incorporado do Google (iframe, sem chave), em vez da API JS do site atual (chave restrita a
 colegio-falcao.com). Páginas EN passam a ter lang="en" (no site atual estavam como pt).
+Troca de idioma: no site atual era um pedido ao servidor do CMS ("onSwitchLocale"); aqui o botão abre a página
+equivalente (pares PT/EN aprendidos dos menus das páginas iniciais; blog: /blog/... <-> /en/blog/...), com
+<link rel="alternate" hreflang>. Os links partidos das páginas EN (sem /en) são corrigidos no build.
 Estatísticas: Cloudflare Web Analytics (sem cookies, sem aviso), ligado pela variável CF_BEACON_TOKEN; sem Google Analytics.
 
 ## Ids do Drive

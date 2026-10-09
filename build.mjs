@@ -147,7 +147,33 @@ const embedMap = html => html.replace(/<div id="map" data-lat="([^"]+)" data-lon
 // Cloudflare Web Analytics: estatísticas sem cookies (não precisa de aviso de consentimento)
 const BEACON = /^[a-f0-9]{32}$/i.test(process.env.CF_BEACON_TOKEN || '')
   ? `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"${process.env.CF_BEACON_TOKEN}"}'></script>` : '';
-const finish = html => showBody(eagerFirst(embedMap(html))).replace('</body>', BEACON + '</body>').replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
+// Idiomas: no site atual a troca PT/EN era feita pelo servidor do CMS (pedido "onSwitchLocale"), que não existe aqui.
+// O botão passa a abrir a página equivalente no outro idioma. Os pares PT/EN vêm dos menus das páginas iniciais.
+const LANG_PAIRS = new Map([['/', '/en']]);
+function learnLangPairs(ptHome, enHome) {
+  const links = h => [...h.matchAll(/href="(\/[^"#?]*)"/g)].map(m => m[1]).filter(u => !/^\/(storage|themes|img|assets)\/|\.[a-z0-9]{2,5}$/i.test(u));
+  const [pt, en] = [links(ptHome), links(enHome)];
+  if (pt.length !== en.length) return console.warn('  aviso: menus PT e EN diferentes, troca de idioma só por regras gerais');
+  pt.forEach((u, i) => { if (u !== '/' && en[i].startsWith('/en')) LANG_PAIRS.set(u, en[i]); });
+}
+function otherLang(url) {
+  if (url.startsWith('/en')) {
+    for (const [pt, en] of LANG_PAIRS) if (en === url) return pt;
+    return url.startsWith('/en/blog') ? url.slice(3) : '/';
+  }
+  return LANG_PAIRS.get(url) || (url.startsWith('/blog') ? '/en' + url : '/en');
+}
+const switchLang = (html, url) => {
+  if (!url) return html;
+  const other = otherLang(url), [pt, en] = url.startsWith('/en') ? [other, url] : [url, other];
+  return html
+    .replace(/ data-request="onSwitchLocale"/g, ` data-href="${other}"`)
+    .replace('</head>', `<link rel="alternate" hreflang="pt" href="${SITE}${pt}"><link rel="alternate" hreflang="en" href="${SITE}${en}"></head>`)
+    .replace('</body>', `<script>document.querySelectorAll('#toggle_lang').forEach(function(i){i.addEventListener('change',function(){location.href=i.dataset.href})})</script></body>`)
+    // links partidos do site atual nas páginas EN (sem o prefixo /en)
+    .replace(/href="\/(educational-offering|our-school)\//g, 'href="/en/$1/').replace('href="/en/educational-offering/1st-cycle"', 'href="/en/educational-offering/primary"');
+};
+const finish = (html, url) => switchLang(showBody(eagerFirst(embedMap(html))), url).replace('</body>', BEACON + '</body>').replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
   .replace(/content="\/img\//g, `content="${SITE}/img/`);
 
 /* ---------- blog ---------- */
@@ -194,6 +220,7 @@ async function main() {
   async function walk(dir) { for (const e of await fs.readdir(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); e.isDirectory() ? await walk(f) : pages.push(f); } }
   await walk('site/pages');
   const tpl = {};
+  learnLangPairs(await read('pages/index.html'), await read('pages/en.html'));
   for (const f of pages) {
     const url = '/' + path.relative('site/pages', f).replace(/\.html$/, '').replace(/^index$/, '');
     let html = await fs.readFile(f, 'utf8');
@@ -202,7 +229,7 @@ async function main() {
     if (url === '/' || url === '/en') html = replaceDiv(html, '<div class="news-slider">', blog(lang).slice(0, NEWS_ON_HOME).map(p => newsCard(p, lang, true)).join(''));
     if (/^(\/en)?\/blog$/.test(url)) { tpl[lang + 'List'] = html; continue; }        // a listagem é gerada abaixo
     if (/\/blog\/default\//.test(url) && !tpl[lang + 'Post']) tpl[lang + 'Post'] = { html, slug: url.split('/').pop() };
-    await write((url === '/' ? '/index' : url) + '.html', finish(html));
+    await write((url === '/' ? '/index' : url) + '.html', finish(html, url));
   }
 
   // listagem do blog, paginada como no site atual (/blog, /blog/pagina/2, ...)
@@ -213,7 +240,7 @@ async function main() {
       const cards = list.slice((k - 1) * PER_PAGE, k * PER_PAGE).map(p => `<div class="col-12 col-md-6 col-lg-4 col-xxxl-3">${newsCard(p, lang)}</div>`).join('');
       html = replaceDiv(html, '<div class="col-10 offset-1"><div class="row">', `<div class="row">${cards}</div>`);
       html = html.replace(/<nav><ul class="pagination">[\s\S]*?<\/ul><\/nav>/, pagination(n, k, base));
-      await write((k === 1 ? base : `${base}/pagina/${k}`) + '.html', finish(html));
+      await write((k === 1 ? base : `${base}/pagina/${k}`) + '.html', finish(html, k === 1 ? base : `${base}/pagina/${k}`));
     }
   }
 
@@ -229,7 +256,7 @@ async function main() {
         .replace(/<div class="post-date">[\s\S]*?<\/div>/, `<div class="post-date"> ${esc(f.month)} </div>`);
       html = replaceDiv(html, '<div class="post-content">', postBody(f));
       html = replaceDiv(html, '<div class="news-slider">', blog(lang).filter(x => x !== p).slice(0, NEWS_ON_HOME).map(x => newsCard(x, lang, true)).join(''));
-      await write(`${lang === 'en' ? '/en' : ''}${p.href}.html`, finish(html));
+      await write(`${lang === 'en' ? '/en' : ''}${p.href}.html`, finish(html, `${lang === 'en' ? '/en' : ''}${p.href}`));
     }
   }
 
