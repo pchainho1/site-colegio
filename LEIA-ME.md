@@ -17,7 +17,8 @@ O visitante nunca fala com o Drive nem com o Apps Script.
    A pasta `dist` já está indicada no `wrangler.jsonc`, por isso não há campo "output directory".
 4. Variáveis de ambiente (Build variables):
    - `NODE_VERSION` = 20
-   - `FEED_URL` = URL da Aplicação Web do blog-feed-drive.gs, com `?refresh=1` no fim
+   - `FEED_URL` = URL da Aplicação Web do blog-feed-drive.gs (termina em `/exec`)
+   - `FEED_KEY` = chave criada por `criarChave()` no Apps Script (guardar como *secret*)
    - `SITE_URL` = endereço final, ex.: https://novo.parque-falcao.com
 5. Domínio: no projeto, Settings > Domains & Routes > Add > Custom domain.
 6. Atualização automática: crie um deploy hook na hospedagem (se o painel o oferecer) e guarde-o

@@ -4,9 +4,11 @@
  * Instalação
  * 1. Crie um projeto em script.google.com (na conta do colégio) e cole este ficheiro.
  * 2. Execute testFeed() uma vez e aceite as permissões (Drive e Documentos).
- * 3. Implementar > Nova implementação > Aplicação Web.
- *    Executar como: eu. Quem tem acesso: qualquer pessoa. (O feed só contém artigos prontos a publicar e fotos da pasta pública.)
- * 4. O site lê o URL da implementação. Para forçar atualização: acrescente ?refresh=1
+ * 3. Execute criarChave() uma vez: guarda a chave FEED_KEY (Propriedades do script) e mostra-a no registo.
+ * 4. Implementar > Nova implementação > Aplicação Web.
+ *    Executar como: eu. Quem tem acesso: qualquer pessoa. Sem a chave não se obtém nada; com ela, só artigos
+ *    publicados e as fotos desses artigos. A pasta de fotos aprovadas pode (e deve) ser privada.
+ * 5. Na Cloudflare: FEED_URL = URL da implementação (termina em /exec) e FEED_KEY = a chave (como secret).
  *
  * Convenções que o script assume (todas confirmadas nos Docs atuais)
  * - Um artigo por mês; o título do Doc inclui mês e ano (ex.: "Blog Maio 2026 ...").
@@ -17,7 +19,7 @@
 
 const CONFIG = {
   FOLDER_ID: '1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa',   // Docs (privada)
-  PUBLIC_PHOTOS_FOLDER_ID: '1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx', // só fotos aprovadas, "qualquer pessoa com o link"
+  PHOTOS_FOLDER_ID: '1aHiZGw6hoRXLQu_X8fSuX080WB4oXdHx', // só fotos aprovadas (pasta privada, uma subpasta por mês)
   MIN_CHARS: 1500,            // abaixo disto o Doc conta como vazio
   CACHE_SECONDS: 600,
   HOLD_IF_CONSENT_NOTE: true  // artigos com nota sobre autorização de imagem ficam "em espera"
@@ -27,22 +29,48 @@ const MESES = ['janeiro','fevereiro','marco','abril','maio','junho','julho','ago
 const IMG_RE = /[\w\-]+\.(?:jpe?g|png|webp)/gi;
 
 function doGet(e) {
-  const cache = CacheService.getScriptCache();
-  const debug = false; // os avisos internos só se veem em testFeed() no editor, nunca no URL público
-  const force = debug || (e && e.parameter && e.parameter.refresh === '1');
-  let body = force ? null : cache.get('feed');
-  if (!body) {
-    body = JSON.stringify(publicView_(buildFeed_(), debug));
-    if (!debug) try { cache.put('feed', body, CONFIG.CACHE_SECONDS); } catch (err) { /* feed grande demais para a cache */ }
-  }
+  const q = (e && e.parameter) || {};
+  // Sem a chave certa não se entrega nada (a chave está em Propriedades do script > FEED_KEY e na Cloudflare)
+  const key = PropertiesService.getScriptProperties().getProperty('FEED_KEY');
+  if (!key || q.key !== key) return json_({ error: 'acesso negado' });
+  const body = feedJson_(q.refresh === '1');
+  if (q.photo) return json_(photo_(q.photo, JSON.parse(body)));
   return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JSON);
 }
+
+function feedJson_(force) {
+  const cache = CacheService.getScriptCache();
+  let body = force ? null : cache.get('feed');
+  if (!body) {
+    body = JSON.stringify(publicView_(buildFeed_(), false));
+    try { cache.put('feed', body, CONFIG.CACHE_SECONDS); } catch (err) { /* feed grande demais para a cache */ }
+  }
+  return body;
+}
+
+// Só entrega fotos que fazem parte de artigos publicados; nunca outro ficheiro do Drive.
+function photo_(id, feed) {
+  const ok = feed.posts.some(p => (p.photos || []).some(f => f.driveId === id));
+  if (!ok) return { error: 'foto não publicada' };
+  const blob = DriveApp.getFileById(id).getBlob();
+  return { name: blob.getName(), mime: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };
+}
+
+function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
 // O feed público não leva avisos internos nem links para os Docs.
 function publicView_(feed, debug) {
   if (debug) return feed;
   return { generated: feed.generated, posts: feed.posts.filter(p => p.status === 'published').map(p => {
     delete p.warnings; delete p.editUrl; delete p.updated; return p; }) };
+}
+
+// Executar uma vez: cria a chave FEED_KEY e mostra-a no registo para copiar para a Cloudflare.
+function criarChave() {
+  const props = PropertiesService.getScriptProperties();
+  let key = props.getProperty('FEED_KEY');
+  if (!key) { key = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''); props.setProperty('FEED_KEY', key); }
+  Logger.log('FEED_KEY: %s', key);
 }
 
 function testFeed() {
@@ -58,7 +86,7 @@ function testFeed() {
 /* ---------- 1. escolher os Docs ---------- */
 function buildFeed_() {
   const folder = DriveApp.getFolderById(CONFIG.FOLDER_ID);
-  const images = indexImages_(DriveApp.getFolderById(CONFIG.PUBLIC_PHOTOS_FOLDER_ID));
+  const images = indexImages_(DriveApp.getFolderById(CONFIG.PHOTOS_FOLDER_ID));
   const groups = {}, ignored = [];
 
   const it = folder.getFilesByType(MimeType.GOOGLE_DOCS);
@@ -150,7 +178,7 @@ function parseDoc_(file, key, images) {
   const local = images.byMonth[key] || {};
   const pick = n => local[n.toLowerCase()] || images.all[n.toLowerCase()];
   const resolved = [], missing = [];
-  const add = f => { if (!resolved.some(r => r.driveId === f.id)) resolved.push({ name: f.name, driveId: f.id, thumb: 'https://lh3.googleusercontent.com/d/' + f.id + '=w1600' }); };
+  const add = f => { if (!resolved.some(r => r.driveId === f.id)) resolved.push({ name: f.name, driveId: f.id }); };
   [post.cover].concat(post.photos).filter(Boolean).forEach(n => {
     const f = pick(n);
     if (f) add(f); else if (missing.indexOf(n) < 0) missing.push(n);
