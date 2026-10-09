@@ -73,11 +73,19 @@ function cleanPicture(pic) {
 function clean(html) {
   // cabeçalho: tira o GTM/Analytics, o modernizr (fica a classe webp fixa) e o carregador do CMS
   html = html.replace(/<html lang="([a-z]+)"[^>]*>/, '<html lang="$1" class="webp">');
+  // scripts próprios da página (separadores, carrosséis, janelas da equipa/espaços): ficam, sem GTM/Analytics,
+  // e correm depois de o jQuery e o tema (carregados com defer) estarem prontos
+  let pageJs = '';
+  html = html.replace(/<noscript id="extra_scripts">([\s\S]*?)<\/noscript>/, (m, c) => {
+    for (const [, code] of c.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g))
+      if (!/dataLayer|gtm\.start|gtag\(/.test(code)) pageJs += `<script data-pagina>document.addEventListener('DOMContentLoaded',function(){${code}\n});</script>`;
+    return '';
+  });
+  html = html.replace(/<\/body>/, pageJs + '</body>');
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, s =>
-    /application\/ld\+json/.test(s) ? s
+    /application\/ld\+json|^<script data-pagina>/.test(s) ? s
       : /window\.BASE_URL/.test(s) ? s.replace(/"https:\/\/www\.colegio-falcao\.com\/"/g, 'location.origin')   // usado pelo JS do tema (BASE_URL + '/themes/...')
       : '');
-  html = html.replace(/<noscript id="extra_scripts">[\s\S]*?<\/noscript>/, '');
   html = html.replace(/<noscript id="extra_styles">([\s\S]*?)<\/noscript>/, (m, c) => '<!--EXTRA_STYLES-->' + (c.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join(''));
   html = html.replace(/<noscript>[\s\S]*?<\/noscript>/g, '');
   html = html.replace(/<link rel="preconnect"[^>]*>/g, '');
