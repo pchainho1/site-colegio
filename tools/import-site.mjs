@@ -85,7 +85,11 @@ function clean(html) {
   // imagens redimensionadas pelo CMS
   html = html.replace(/<picture\b[\s\S]*?<\/picture>/g, cleanPicture);
   html = html.replace(/(data-src|src|data-srcset|srcset|content)="(https:\/\/www\.colegio-falcao\.com\/(?:storage\/app\/media\/imageresizecache|imageresize)\/[^"]+)"/g, (m, a, u) => {
-    images.set(u, { name: imgName(u), convert: !/\.webp$/.test(u) }); return `${a}="/img/${imgName(u)}"`;
+    // listas "url 1x, url 2x" (fontes fora de <picture>): trata cada endereço
+    return `${a}="${u.split(',').map(x => {
+      const [v, d] = x.trim().split(/\s+/);
+      images.set(v, { name: imgName(v), convert: !/\.webp$/.test(v) }); return `/img/${imgName(v)}${d ? ' ' + d : ''}`;
+    }).join(', ')}"`;
   });
   // restantes ficheiros do domínio (ícones, PDFs, imagens da media) e links internos
   html = html.replace(/(href|src|data-src|content)="(https:\/\/www\.colegio-falcao\.com[^"]*)"/g, (m, a, u) => {
