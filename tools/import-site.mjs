@@ -74,7 +74,9 @@ function clean(html) {
   // cabeçalho: tira o GTM/Analytics, o modernizr (fica a classe webp fixa) e o carregador do CMS
   html = html.replace(/<html lang="([a-z]+)"[^>]*>/, '<html lang="$1" class="webp">');
   html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, s =>
-    /application\/ld\+json/.test(s) ? s : '');
+    /application\/ld\+json/.test(s) ? s
+      : /window\.BASE_URL/.test(s) ? s.replace(/"https:\/\/www\.colegio-falcao\.com\/"/g, 'location.origin')   // usado pelo JS do tema (BASE_URL + '/themes/...')
+      : '');
   html = html.replace(/<noscript id="extra_scripts">[\s\S]*?<\/noscript>/, '');
   html = html.replace(/<noscript id="extra_styles">([\s\S]*?)<\/noscript>/, (m, c) => '<!--EXTRA_STYLES-->' + (c.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join(''));
   html = html.replace(/<noscript>[\s\S]*?<\/noscript>/g, '');
@@ -99,8 +101,8 @@ function clean(html) {
     return `${a}="${l.replace(/\?page=(\d+)/, '/pagina/$1')}"`;
   });
   // ficheiros já referidos com caminho relativo (ex.: ícones em /storage/app/media/icons)
-  html = html.replace(/(href|src|data-src)="(\/(?:storage|themes|plugins)\/[^"]+\.[a-z0-9]{2,5})"/gi, (m, a, u) =>
-    RESIZED.test(u) ? m : `${a}="${addFile(BASE + u)}"`);
+  html = html.replace(/(href|src|data-src|data-srcset|srcset)="(\/(?:storage|themes|plugins)\/[^"]+)"/gi, (m, a, v) =>
+    RESIZED.test(v) ? m : `${a}="${v.split(/,\s*/).map(x => { const [u, d] = x.trim().split(/\s+/); return addFile(BASE + u) + (d ? ' ' + d : ''); }).join(', ')}"`);
   // url(...) em estilos dentro da página (ex.: @font-face): caminho relativo e ficheiro copiado
   html = html.replace(/url\((['"]?)https:\/\/www\.colegio-falcao\.com(\/[^'")]+)\1\)/g, (m, q, u) => `url(${q}${addFile(BASE + u)}${q})`);
   return html;
@@ -137,9 +139,12 @@ const combined = [...new Set(home.match(/https:\/\/www\.colegio-falcao\.com\/com
 const css = home.match(/https:\/\/www\.colegio-falcao\.com\/combine\/[a-f0-9]+-\d+(?=\?ck=[^"]*" rel="stylesheet")/)[0];
 const js = combined.find(u => u !== css);
 let themeCss = await get(css);
+themeCss = themeCss.replace(/url\((['"]?)\.\.\/([^'")]+)\1\)/g, (m, q, u) => `url(${q}${addFile(BASE + '/' + u)}${q})`);   // relativos a /combine/
 themeCss = themeCss.replace(/url\((['"]?)(https:\/\/www\.colegio-falcao\.com[^'")]+|\/[^'")]+)\1\)/g, (m, q, u) => `url(${q}${addFile(u.startsWith('http') ? u : BASE + u)}${q})`);
 await write(path.join(OUT, 'assets', 'theme.css'), themeCss);
-await write(path.join(OUT, 'assets', 'theme.js'), await get(js));
+const themeJs = await get(js);
+for (const [, u] of themeJs.matchAll(/'(\/(?:themes|storage)\/[^']+\.[a-z0-9]{2,5})'/g)) addFile(BASE + u);   // ex.: ícone do mapa
+await write(path.join(OUT, 'assets', 'theme.js'), themeJs);
 console.log('tema:', css, js);
 
 /* ---------- 4. ficheiros e imagens ---------- */
