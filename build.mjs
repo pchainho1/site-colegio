@@ -1,6 +1,9 @@
 /**
- * Gera o site estático do Colégio Parque do Falcão.
- * Lê o feed do blog (Apps Script), descarrega e otimiza as fotos e escreve tudo em dist/.
+ * Gera o site estático do Colégio Parque do Falcão em dist/, com o aspeto do site atual.
+ *
+ * - As páginas e imagens do site atual estão em site/ (importadas com tools/import-site.mjs).
+ * - O blog junta os artigos importados do site atual com os novos do Google Drive (feed do Apps Script):
+ *   do Drive só entram os meses depois de ARCHIVE_UNTIL, para não duplicar os que já estavam no site.
  *
  * Variáveis de ambiente
  *   FEED_URL   URL da Aplicação Web do blog-feed-drive.gs, terminado em /exec (sem ela usa feed.sample.json)
@@ -17,15 +20,20 @@ const SITE = (process.env.SITE_URL || 'https://novo.parque-falcao.com').replace(
 const FEED_URL = /^https?:\/\//.test(process.env.FEED_URL || '') ? process.env.FEED_URL : undefined;
 const FEED_KEY = process.env.FEED_KEY || '';
 const PHOTO_DIR = process.env.PHOTO_DIR;
-const FORM = 'https://forms.gle/5s2jkXaq54pBxrhg6';
+const OLD_SITE = 'https://www.colegio-falcao.com';
+const ARCHIVE_UNTIL = '2026-06';   // último mês publicado no site antigo (os artigos até aqui vêm de site/)
+const PER_PAGE = 6;                // artigos por página na listagem do blog (como no site atual)
+const NEWS_ON_HOME = 8;            // artigos no carrossel "Notícias & Eventos"
 const WIDTHS = [640, 1200, 1800];
+const PLACEHOLDER = '/themes/abddcms/assets/img/tools/preloading_img.svg';
+const ARROW = '/themes/abddcms/assets/img/icons/arrow_right_icon.svg';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const words = p => [p.summary, ...p.intro, ...p.sections.flatMap(s => [s.h, ...s.p]), p.closing].join(' ').split(/\s+/).length;
-const mins = p => Math.max(1, Math.round(words(p) / 190)) + ' min de leitura';
 const clip = (t, n) => t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t;
+const write = async (p, c) => { const f = path.join('dist', p); await fs.mkdir(path.dirname(f), { recursive: true }); await fs.writeFile(f, c); };
+const read = p => fs.readFile(path.join('site', p), 'utf8');
 
-/* ---------- dados ---------- */
+/* ---------- feed do Drive ---------- */
 // Pedido ao Apps Script com a chave; o feed é sempre regenerado (refresh=1), as fotos não
 async function fromScript(params) {
   const u = new URL(FEED_URL);
@@ -51,7 +59,6 @@ async function loadFeed() {
   return data.posts.filter(p => p.status === 'published').sort((a, b) => b.sort.localeCompare(a.sort));
 }
 
-/* ---------- fotos ---------- */
 async function getBuffer(f) {
   if (PHOTO_DIR) { try { return await fs.readFile(path.join(PHOTO_DIR, f.name)); } catch {} }
   const cp = path.join('.cache', f.driveId + '.img');
@@ -66,6 +73,7 @@ async function getBuffer(f) {
   await fs.mkdir('.cache', { recursive: true }); await fs.writeFile(cp, b);
   return b;
 }
+
 async function processPhotos(post) {
   const photos = [...(post.photos || [])].sort((a, b) => (b.name === post.cover) - (a.name === post.cover));
   const out = [];
@@ -83,149 +91,126 @@ async function processPhotos(post) {
         variants.push({ url: `/img/${post.slug}/${id}-${w}.webp`, width: info.width });
         if (w === 1200 || !ref) ref = info;
       }
-      out.push({ variants, w: ref.width, h: ref.height, alt: `${post.title} — foto ${i + 1}` });
+      out.push({ variants, w: ref.width, h: ref.height });
     } catch (e) { console.warn(`  foto ignorada (${f.name}): ${e.message}`); }
   }
   post.imgs = out;
 }
-const imgTag = (im, sizes, eager) => {
+const imgTag = (im, sizes, alt) => {
   const mid = im.variants.find(v => v.width >= 1000) || im.variants[im.variants.length - 1];
-  return `<img src="${mid.url}" srcset="${im.variants.map(v => `${v.url} ${v.width}w`).join(', ')}" sizes="${sizes}" width="${im.w}" height="${im.h}" alt="${esc(im.alt)}" ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">`;
+  return `<img src="${mid.url}" srcset="${im.variants.map(v => `${v.url} ${v.width}w`).join(', ')}" sizes="${sizes}" width="${im.w}" height="${im.h}" alt="${esc(alt)}" loading="lazy" decoding="async">`;
 };
 
-/* ---------- mosaicos (capas sem foto) ---------- */
-const PAL = ['#3D09DD', '#6D3CEA', '#25DBAE', '#EDB92F', '#F33340', '#28066A'];
-function rng(seed) { let h = 1779033703 ^ seed.length; for (let i = 0; i < seed.length; i++) { h = Math.imul(h ^ seed.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; } return () => { h = Math.imul(h ^ h >>> 16, 2246822507); h = Math.imul(h ^ h >>> 13, 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; }; }
-function mosaic(seed, cols, rows) {
-  const r = rng(seed), s = 100; let o = '';
-  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-    const a = Math.floor(r() * 6); let b = Math.floor(r() * 6); if (b === a) b = (b + 1) % 6;
-    o += `<rect x="${x * s}" y="${y * s}" width="${s}" height="${s}" fill="${PAL[a]}"/><path d="M0 0H1A1 1 0 0 1 0 1Z" fill="${PAL[b]}" transform="translate(${x * s} ${y * s}) rotate(${Math.floor(r() * 4) * 90} 50 50) scale(${s})"/>`;
-  }
-  return `<svg viewBox="0 0 ${cols * s} ${rows * s}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${o}</svg>`;
+/* ---------- utilitários de HTML ---------- */
+// substitui o conteúdo do elemento <div ...> que começa em `marker` (contando divs aninhadas)
+function replaceDiv(html, marker, inner) {
+  const a = html.indexOf(marker);
+  if (a < 0) return html;
+  const open = html.indexOf('>', a) + 1;
+  let depth = 1, i = open;
+  const re = /<div\b|<\/div>/g; re.lastIndex = open;
+  for (let m; (m = re.exec(html));) { depth += m[0] === '</div>' ? -1 : 1; if (!depth) { i = m.index; break; } }
+  return html.slice(0, open) + inner + html.slice(i);
 }
-const logo = () => { let o = ''; [['#3D09DD', 0], ['#25DBAE', 90], ['#EDB92F', 270], ['#F33340', 180]].forEach((v, i) => { o += `<path d="M0 0H1A1 1 0 0 1 0 1Z" fill="${v[0]}" transform="translate(${(i % 2) * 24} ${Math.floor(i / 2) * 24}) rotate(${v[1]} 12 12) scale(24)"/>`; }); return `<svg viewBox="0 0 48 48" aria-hidden="true">${o}</svg>`; };
-function heroMosaic() {
-  const r = rng('falcao-hero'), s = 100, n = 4; let o = '';
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    const a = Math.floor(r() * 6); let b = Math.floor(r() * 6); if (b === a) b = (b + 1) % 6;
-    const rot = Math.floor(r() * 4) * 90, d = (x + y) * 90 + Math.floor(r() * 120);
-    o += `<g transform="translate(${x * s} ${y * s})"><g class="pop" style="animation-delay:${d}ms"><rect width="${s}" height="${s}" fill="${PAL[a]}"/><path d="M0 0H1A1 1 0 0 1 0 1Z" fill="${PAL[b]}" transform="rotate(${rot} 50 50) scale(${s})"/></g></g>`;
-  }
-  return `<svg viewBox="0 0 ${n * s} ${n * s}" role="img" aria-label="Mosaico de quartos de círculo, inspirado no logótipo do colégio"><g style="clip-path:inset(0 round 0 140px 0 0)">${o}</g></svg>`;
-}
-const pillarIcon = i => { const c = [['#25DBAE', '#28066A'], ['#6D3CEA', '#EDB92F'], ['#F33340', '#3D09DD']][i]; return `<svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><rect width="44" height="44" fill="${c[1]}"/><path d="M0 0H1A1 1 0 0 1 0 1Z" fill="${c[0]}" transform="rotate(${i * 90} 22 22) scale(44)"/></svg>`; };
+const setMeta = (html, { title, desc }) => {
+  if (title) html = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${esc(title)} | Colégio Parque do Falcão</title>`)
+    .replace(/(<meta (?:name|property)="(?:title|twitter:title|og:title)" content=")[^"]*"/g, `$1${esc(title)} | Colégio Parque do Falcão"`);
+  if (desc) html = html.replace(/(<meta (?:name|property)="(?:description|twitter:description|og:description)" content=")[^"]*"/g, `$1${esc(desc)}"`);
+  return html;
+};
 
-/* ---------- estilos ---------- */
-const EXTRA_CSS = `
-@font-face{font-family:Jost;font-weight:400;font-style:normal;font-display:swap;src:url(/fonts/jost-400.woff2) format("woff2")}
-@font-face{font-family:Jost;font-weight:500;font-style:normal;font-display:swap;src:url(/fonts/jost-500.woff2) format("woff2")}
-@font-face{font-family:Jost;font-weight:600 700;font-style:normal;font-display:swap;src:url(/fonts/jost-600.woff2) format("woff2")}
-.grid .card.dup{display:none}
-.filtering .grid .card.dup{display:flex}
-.filtering .feat{display:none}
-.card[hidden]{display:none!important}
-.slides{display:flex;height:100%;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}
-.slides::-webkit-scrollbar{display:none}
-.slides img{flex:0 0 100%;width:100%;height:100%;object-fit:cover;scroll-snap-align:center}
-.feat .cv img,.card .cv img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.feat .cv{position:relative}`;
-const minify = c => c.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s*([{};:,>])\s*/g, '$1').replace(/\s+/g, ' ').replace(/;}/g, '}');
-let CSS = '';
+const ASSETS = '<link rel="stylesheet" href="/assets/bootstrap.min.css"><link rel="stylesheet" href="/assets/theme.css">'
+  + '<script defer src="/assets/jquery.min.js"></script><script defer src="/assets/theme.js"></script>';
+const finish = html => html.replace('<!--ASSETS-->', ASSETS).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
+  .replace(/content="\/img\//g, `content="${SITE}/img/`);
 
-/* ---------- layout ---------- */
-const layout = ({ title, desc, url, body, image, ld, script }) => `<!DOCTYPE html>
-<html lang="pt-PT"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(title)}</title><meta name="description" content="${esc(desc)}"><link rel="canonical" href="${SITE}${url}">
-<meta property="og:type" content="${ld ? 'article' : 'website'}"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${SITE}${url}"><meta property="og:locale" content="pt_PT">${image ? `<meta property="og:image" content="${SITE}${image}">` : ''}
-<link rel="preload" href="/fonts/jost-600.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/jost-400.woff2" as="font" type="font/woff2" crossorigin>
-<style>${CSS}</style>${ld ? `<script type="application/ld+json">${JSON.stringify(ld)}</script>` : ''}</head>
-<body>
-<header class="top"><div class="wrap"><a class="brand" href="/" aria-label="Colégio Parque do Falcão — início"><span style="width:42px;height:42px;display:block">${logo()}</span><span>Colégio Parque do Falcão<small>Arrentela, Seixal</small></span></a>
-<nav class="nav" aria-label="Principal"><a href="/">Início</a><a href="/blog/">Blog</a><a href="#contactos">Contactos</a><a class="btn" href="${FORM}" target="_blank" rel="noopener">Pré-inscrição</a></nav></div></header>
-<main>${body}</main>
-<footer class="foot" id="contactos"><div class="wrap"><div><p><strong>Colégio Parque do Falcão</strong></p><p>Creche, Pré-escolar e 1.º Ciclo</p><p>Arrentela, Seixal</p></div>
-<div><p>Telefone: <a href="tel:+351212275035">+351 212 275 035</a></p><p>Instagram: @colegiofalcao</p><p><a href="${FORM}" target="_blank" rel="noopener">Ficha de pré-inscrição</a></p></div>
-<div><p style="opacity:.75">© Colégio Parque do Falcão</p></div></div></footer>${script ? `<script>${script}</script>` : ''}</body></html>`;
+/* ---------- blog ---------- */
+const newsCard = (p, lang, withTxt) => `<div class="news-card"><a href="${lang === 'en' ? '/en' : ''}${p.href}"><span class="news-image"><picture>${p.cardImg}</picture></span><span class="text-container"><span class="news-title"><span>${esc(p.title)}</span></span>${withTxt
+  ? `<span class="news-txt"><span>${esc(p.excerpt)}</span></span>` : `<span class="news-date"><span>${esc(p.date)}</span></span>`}</span><span class="news-arrow"><img src="${ARROW}" alt=""></span></a></div>`;
 
-/* ---------- páginas ---------- */
-const coverEl = (p, sizes, mos) => p.imgs?.length ? imgTag(p.imgs[0], sizes) : mosaic(p.slug + (mos || ''), mos ? 5 : 4, 3);
-const card = (p, dup) => `<a class="card${dup ? ' dup' : ''}" href="/blog/${p.slug}/" data-tags="${esc(p.tags.join('|'))}" data-text="${esc((p.title + ' ' + p.summary + ' ' + p.tags.join(' ')).toLowerCase())}"><div class="cv">${coverEl(p, '(min-width:980px) 380px, (min-width:620px) 50vw, 100vw')}</div><div class="bd"><div class="meta">${esc(p.month)} · ${mins(p)}</div><h3>${esc(p.title)}</h3><p>${esc(p.summary)}</p><div class="tags">${p.tags.slice(0, 3).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div></div></a>`;
-
-function homePage(posts) {
-  return layout({
-    title: 'Colégio Parque do Falcão — Creche, Pré-escolar e 1.º Ciclo em Arrentela, Seixal',
-    desc: 'Creche, Pré-escolar e 1.º Ciclo em Arrentela, Seixal. O mesmo projeto pedagógico acompanha cada criança do berço ao 4.º ano.', url: '/',
-    body: `<section class="hero"><div class="wrap"><div><h1>Onde o crescer ganha asas</h1><p class="lead">Creche, Pré-escolar e 1.º Ciclo em Arrentela, Seixal. O mesmo projeto pedagógico acompanha cada criança do berço ao 4.º ano.</p><div class="cta"><a class="btn" href="${FORM}" target="_blank" rel="noopener">Pedir pré-inscrição</a><a class="btn alt" href="/blog/">Ler o blog</a></div></div><div class="heromos">${heroMosaic()}</div></div></section>
-<section class="sec soft"><div class="wrap"><div class="sechead"><h2>Aprender a brincar, explorar e crescer</h2></div><div class="pillars">
-<div class="pillar">${pillarIcon(0)}<h3>A natureza como sala de aula</h3><p>Horta escolar, projeto Eco-Escolas, aulas ao ar livre e visitas como a do Monte Selvagem.</p></div>
-<div class="pillar">${pillarIcon(1)}<h3>Um só projeto, do berço ao 4.º ano</h3><p>Rotinas e aprendizagens que crescem com a criança, sem ruturas entre a creche, o pré-escolar e o 1.º Ciclo.</p></div>
-<div class="pillar">${pillarIcon(2)}<h3>Famílias sempre por perto</h3><p>Festa da Família, intercâmbios entre turmas e momentos de partilha ao longo de todo o ano letivo.</p></div></div></div></section>
-<section class="sec"><div class="wrap"><div class="sechead"><h2>O que se passou no Falcão</h2><a class="btn alt" href="/blog/">Ver todos os artigos</a></div><div class="grid">${posts.slice(0, 3).map(p => card(p)).join('')}</div></div></section>
-<section class="sec"><div class="wrap"><div class="visit"><div><h2>Venha conhecer o colégio</h2><p>Preencha a ficha de pré-inscrição e entramos em contacto para marcar a visita.</p></div><a class="btn" href="${FORM}" target="_blank" rel="noopener">Pedir pré-inscrição</a></div></div></section>`
-  });
+function pagination(n, page, base) {
+  const href = k => k === 1 ? base : `${base}/pagina/${k}`;
+  const li = k => k === page ? `<li class="page-item active" aria-current="page"><span class="page-link">${k}</span></li>` : `<li class="page-item"><a class="page-link" href="${href(k)}">${k}</a></li>`;
+  return `<nav><ul class="pagination">${page > 1 ? `<li class="page-item"><a class="page-link" href="${href(page - 1)}" rel="prev" aria-label="Anterior">&lsaquo;</a></li>` : ''}${Array.from({ length: n }, (_, i) => li(i + 1)).join('')}${page < n ? `<li class="page-item"><a class="page-link" href="${href(page + 1)}" rel="next" aria-label="Seguinte">&rsaquo;</a></li>` : ''}</ul></nav>`;
 }
 
-const FILTER_JS = `(()=>{const q=document.getElementById('q'),pills=document.getElementById('pills'),cards=[...document.querySelectorAll('.grid .card')],cnt=document.getElementById('cnt'),root=document.getElementById('res');let tag='';
-function run(){const t=q.value.trim().toLowerCase(),on=!!(tag||t);root.classList.toggle('filtering',on);let n=0;cards.forEach(c=>{const ok=(!tag||c.dataset.tags.split('|').includes(tag))&&(!t||c.dataset.text.includes(t));const vis=ok&&(on||!c.classList.contains('dup'));c.hidden=!vis;if(ok)n++;});
-cnt.textContent=n+(n===1?' artigo':' artigos');document.getElementById('none').hidden=n>0;}
-q.addEventListener('input',run);pills.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;tag=b.dataset.t;pills.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));run();});})();`;
-
-function blogPage(posts) {
-  const m = {}; posts.forEach(p => p.tags.forEach(t => m[t] = (m[t] || 0) + 1));
-  const top = Object.entries(m).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt')).slice(0, 7).map(e => e[0]);
-  const f = posts[0];
-  return layout({
-    title: 'Blog do Falcão | Colégio Parque do Falcão', desc: 'Um resumo de cada mês no Colégio Parque do Falcão, escrito pela equipa.', url: '/blog/',
-    script: FILTER_JS,
-    body: `<section class="bloghead"><div class="wrap"><h1>Blog do Falcão</h1><p>Um resumo de cada mês no colégio, escrito pela equipa.</p>
-<div class="tools"><input class="search" id="q" type="search" placeholder="Pesquisar nos artigos" aria-label="Pesquisar nos artigos"><div class="pills" id="pills" role="group" aria-label="Filtrar por etiqueta"><button class="pill" type="button" data-t="" aria-pressed="true">Todos</button>${top.map(t => `<button class="pill" type="button" data-t="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join('')}</div></div>
-<div id="res"><p class="count" id="cnt">${posts.length} artigos</p>
-<a class="feat" href="/blog/${f.slug}/"><div class="cv">${f.imgs?.length ? imgTag(f.imgs[0], '(min-width:820px) 55vw, 100vw', true) : mosaic(f.slug, 5, 3)}</div><div class="bd"><div class="meta">${esc(f.month)} · ${mins(f)}</div><h2>${esc(f.title)}</h2><p>${esc(clip(f.summary, 260))}</p><div class="tags">${f.tags.slice(0, 4).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div></div></a>
-<div class="grid">${posts.map((p, i) => card(p, i === 0)).join('')}</div><div class="empty" id="none" hidden>Nenhum artigo encontrado. Experimente outra palavra ou volte a “Todos”.</div></div></div></section>`
-  });
+function postBody(p) {
+  return p.intro.map(t => `<p>${esc(t)}</p>`).join('') + p.sections.map(s => `<h3>${esc(s.h)}</h3>${s.p.map(t => `<p>${esc(t)}</p>`).join('')}`).join('') + (p.closing ? `<p><strong>${esc(p.closing)}</strong></p>` : '');
 }
-
-const CAROUSEL_JS = `document.querySelectorAll('.stage').forEach(st=>{const sl=st.querySelector('.slides');if(!sl)return;const n=sl.children.length,c=st.querySelector('.cnt'),go=d=>sl.scrollBy({left:d*sl.clientWidth,behavior:'smooth'});st.querySelector('.pv').onclick=()=>go(-1);st.querySelector('.nx').onclick=()=>go(1);sl.addEventListener('scroll',()=>{c.textContent=(Math.round(sl.scrollLeft/sl.clientWidth)+1)+' / '+n},{passive:true});});`;
-
-function postPage(p, i, posts) {
-  const newer = posts[i - 1], older = posts[i + 1], n = p.imgs.length;
-  const stage = n ? `<div class="stage"><div class="slides" tabindex="0" aria-label="Fotografias do artigo">${p.imgs.map((im, k) => imgTag(im, '(min-width:1180px) 1116px, 100vw', k === 0)).join('')}</div>${n > 1 ? `<div class="ctl"><button class="pv" type="button" aria-label="Foto anterior">‹</button><span class="cnt">1 / ${n}</span><button class="nx" type="button" aria-label="Foto seguinte">›</button></div>` : ''}</div>` : `<div class="stage">${mosaic(p.slug, 5, 3)}</div>`;
-  const og = n ? p.imgs[0].variants.find(v => v.width >= 1000)?.url || p.imgs[0].variants.at(-1).url : null;
-  const desc = clip(p.meta || p.summary, 158);
-  const [mes, ano] = p.month.split(' ');
-  return layout({
-    title: `${p.title} | Colégio Parque do Falcão`, desc, url: `/blog/${p.slug}/`, image: og, script: n > 1 ? CAROUSEL_JS : '',
-    ld: { '@context': 'https://schema.org', '@type': 'BlogPosting', headline: p.title, description: desc, inLanguage: 'pt-PT', datePublished: p.sort ? p.sort + '-28' : undefined, mainEntityOfPage: `${SITE}/blog/${p.slug}/`, image: og ? SITE + og : undefined, publisher: { '@type': 'EducationalOrganization', name: 'Colégio Parque do Falcão' } },
-    body: `<div class="wrap"><nav class="crumbs" aria-label="Localização"><a href="/">Início</a> / <a href="/blog/">Blog</a> / ${esc(p.month)}</nav>
-<header class="posthead"><div class="meta">${esc(p.month)} · ${mins(p)}</div><h1>${esc(p.title)}</h1><p class="lead">${esc(clip(p.summary, 230))}</p></header>${stage}
-<div class="post"><article class="prose">${p.intro.map(t => `<p>${esc(t)}</p>`).join('')}${p.sections.map((s, k) => `<h2 id="s${k}">${esc(s.h)}</h2>${s.p.map(t => `<p>${esc(t)}</p>`).join('')}`).join('')}${p.closing ? `<p><strong>${esc(p.closing)}</strong></p>` : ''}</article>
-<aside class="aside"><div><h3>Neste artigo</h3><ul class="toc">${p.sections.map((s, k) => `<li><a href="#s${k}">${esc(s.h)}</a></li>`).join('')}</ul></div>${p.tags.length ? `<div><h3>Etiquetas</h3><div class="tags" style="padding:0">${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div></div>` : ''}</aside></div>
-<div class="visit"><div><h2>Quer conhecer o projeto educativo de perto?</h2><p>Ligue para +351 212 275 035 ou preencha a ficha de pré-inscrição.</p></div><a class="btn" href="${FORM}" target="_blank" rel="noopener">Pedir pré-inscrição</a></div>
-<nav class="pn" aria-label="Outros artigos">${older ? `<a href="/blog/${older.slug}/"><small>Mês anterior</small>${esc(older.title)}</a>` : '<span></span>'}${newer ? `<a href="/blog/${newer.slug}/"><small>Mês seguinte</small>${esc(newer.title)}</a>` : '<span></span>'}</nav></div>`
-  });
-}
-
-/* ---------- construção ---------- */
-const write = async (p, c) => { const f = path.join('dist', p); await fs.mkdir(path.dirname(f), { recursive: true }); await fs.writeFile(f, c); };
 
 async function main() {
   const t0 = Date.now();
   await fs.rm('dist', { recursive: true, force: true });
-  CSS = minify((await fs.readFile('styles.css', 'utf8')).replace(/@import[^;]+;/g, '') + EXTRA_CSS);
-  const posts = await loadFeed();
-  console.log(`${posts.length} artigos`);
-  for (const p of posts) { p.tags ||= []; p.intro ||= []; p.sections ||= []; p.closing ||= ''; console.log('·', p.month, `(${p.photos?.length || 0} fotos)`); await processPhotos(p); }
 
-  for (const [w, f] of [[400, '400'], [500, '500'], [600, '600']]) await fs.mkdir('dist/fonts', { recursive: true }).then(() => fs.copyFile(`node_modules/@fontsource/jost/files/jost-latin-${w}-normal.woff2`, `dist/fonts/jost-${f}.woff2`));
+  // ficheiros estáticos: tema, bibliotecas, ícones, fontes, PDFs e imagens do site atual
+  await fs.cp('site/files', 'dist', { recursive: true });
+  await fs.cp('site/img', 'dist/img', { recursive: true });
+  await fs.cp('site/assets', 'dist/assets', { recursive: true });
+  await fs.copyFile('node_modules/bootstrap/dist/css/bootstrap.min.css', 'dist/assets/bootstrap.min.css');
+  await fs.copyFile('node_modules/jquery/dist/jquery.min.js', 'dist/assets/jquery.min.js');
 
-  await write('index.html', homePage(posts));
-  await write('blog/index.html', blogPage(posts));
-  for (const [i, p] of posts.entries()) await write(`blog/${p.slug}/index.html`, postPage(p, i, posts));
-  await write('404.html', layout({ title: 'Página não encontrada | Colégio Parque do Falcão', desc: 'Página não encontrada.', url: '/404.html', body: '<div class="wrap" style="padding:80px 0"><h1>Página não encontrada</h1><p style="margin:1em 0 1.4em" class="meta">O endereço pode ter mudado.</p><a class="btn" href="/blog/">Ir para o blog</a></div>' }));
-  await write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/blog/', ...posts.map(p => `/blog/${p.slug}/`)].map(u => `<url><loc>${SITE}${u}</loc></url>`).join('')}</urlset>`);
+  // artigos: os importados (site antigo) + os do Drive depois de ARCHIVE_UNTIL
+  const archive = JSON.parse(await read('posts.json'));
+  const feed = (await loadFeed()).filter(p => p.sort > ARCHIVE_UNTIL);
+  console.log(`${feed.length} artigo(s) novos do Drive`);
+  for (const p of feed) { p.tags ||= []; p.intro ||= []; p.sections ||= []; p.closing ||= ''; console.log('·', p.month, `(${p.photos?.length || 0} fotos)`); await processPhotos(p); }
+  const fromFeed = feed.map(p => ({
+    href: `/blog/default/${p.slug}`, title: p.title, date: p.month, excerpt: clip(p.summary, 420), feed: p,
+    cardImg: p.imgs.length ? imgTag(p.imgs[0], '(min-width:992px) 33vw, (min-width:768px) 50vw, 100vw', p.title) : `<img src="${PLACEHOLDER}" alt="">`,
+  }));
+  const blog = lang => [...fromFeed, ...archive[lang].map(a => ({
+    ...a, href: a.href.replace(/^\/en/, ''), excerpt: archive.excerpts[a.href] || '',
+    cardImg: a.pic,
+  }))];
+
+  // páginas importadas
+  const pages = [];
+  async function walk(dir) { for (const e of await fs.readdir(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); e.isDirectory() ? await walk(f) : pages.push(f); } }
+  await walk('site/pages');
+  const tpl = {};
+  for (const f of pages) {
+    const url = '/' + path.relative('site/pages', f).replace(/\.html$/, '').replace(/^index$/, '');
+    let html = await fs.readFile(f, 'utf8');
+    const lang = url.startsWith('/en') ? 'en' : 'pt';
+    if (url === '/' || url === '/en') html = replaceDiv(html, '<div class="news-slider">', blog(lang).slice(0, NEWS_ON_HOME).map(p => newsCard(p, lang, true)).join(''));
+    if (/^(\/en)?\/blog$/.test(url)) { tpl[lang + 'List'] = html; continue; }        // a listagem é gerada abaixo
+    if (/\/blog\/default\//.test(url) && !tpl[lang + 'Post']) tpl[lang + 'Post'] = { html, slug: url.split('/').pop() };
+    await write((url === '/' ? '/index' : url) + '.html', finish(html));
+  }
+
+  // listagem do blog, paginada como no site atual (/blog, /blog/pagina/2, ...)
+  for (const lang of ['pt', 'en']) {
+    const list = blog(lang), base = (lang === 'en' ? '/en' : '') + '/blog', n = Math.ceil(list.length / PER_PAGE);
+    for (let k = 1; k <= n; k++) {
+      let html = tpl[lang + 'List'];
+      const cards = list.slice((k - 1) * PER_PAGE, k * PER_PAGE).map(p => `<div class="col-12 col-md-6 col-lg-4 col-xxxl-3">${newsCard(p, lang)}</div>`).join('');
+      html = replaceDiv(html, '<div class="col-10 offset-1"><div class="row">', `<div class="row">${cards}</div>`);
+      html = html.replace(/<nav><ul class="pagination">[\s\S]*?<\/ul><\/nav>/, pagination(n, k, base));
+      await write((k === 1 ? base : `${base}/pagina/${k}`) + '.html', finish(html));
+    }
+  }
+
+  // artigos novos do Drive, no modelo de artigo do site atual
+  for (const lang of ['pt', 'en']) {
+    const { html: t, slug } = tpl[lang + 'Post'];
+    for (const p of fromFeed) {
+      const f = p.feed;
+      let html = t.split(slug).join(f.slug);
+      html = setMeta(html, { title: f.title, desc: clip(f.meta || f.summary, 158) });
+      html = replaceDiv(html, '<div class="post-image-container', f.imgs.map(im => `<picture class="post-image">${imgTag(im, '(min-width:768px) 50vw, 100vw', f.title)}</picture>`).join(''));
+      html = html.replace(/<h2 class="post-title">[\s\S]*?<\/h2>/, `<h2 class="post-title">${esc(f.title)}</h2>`)
+        .replace(/<div class="post-date">[\s\S]*?<\/div>/, `<div class="post-date"> ${esc(f.month)} </div>`);
+      html = replaceDiv(html, '<div class="post-content">', postBody(f));
+      html = replaceDiv(html, '<div class="news-slider">', blog(lang).filter(x => x !== p).slice(0, NEWS_ON_HOME).map(x => newsCard(x, lang, true)).join(''));
+      await write(`${lang === 'en' ? '/en' : ''}${p.href}.html`, finish(html));
+    }
+  }
+
+  const urls = pages.map(f => '/' + path.relative('site/pages', f).replace(/\.html$/, '').replace(/^index$/, ''))
+    .filter(u => u !== '/404').concat(fromFeed.flatMap(p => [p.href, '/en' + p.href]));
+  await write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${[...new Set(urls)].map(u => `<url><loc>${SITE}${u}</loc></url>`).join('')}</urlset>`);
   await write('robots.txt', `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-  await write('_headers', `/img/*\n  Cache-Control: public, max-age=31536000, immutable\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n`);
-  console.log(`Concluído em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  await write('_headers', `/img/*\n  Cache-Control: public, max-age=31536000, immutable\n/storage/*\n  Cache-Control: public, max-age=31536000, immutable\n/themes/*\n  Cache-Control: public, max-age=604800\n/assets/*\n  Cache-Control: public, max-age=604800\n/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n`);
+  console.log(`${pages.length} páginas, ${blog('pt').length} artigos no blog. Concluído em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 main().catch(e => { console.error(e); process.exit(1); });
