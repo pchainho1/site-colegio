@@ -98,6 +98,11 @@ function clean(html) {
     if (/\.[a-z0-9]{2,5}(\?|$)/i.test(l.split('#')[0]) && !isPage(l.split('?')[0])) return `${a}="${addFile(u)}"`;
     return `${a}="${l.replace(/\?page=(\d+)/, '/pagina/$1')}"`;
   });
+  // ficheiros já referidos com caminho relativo (ex.: ícones em /storage/app/media/icons)
+  html = html.replace(/(href|src|data-src)="(\/(?:storage|themes|plugins)\/[^"]+\.[a-z0-9]{2,5})"/gi, (m, a, u) =>
+    RESIZED.test(u) ? m : `${a}="${addFile(BASE + u)}"`);
+  // url(...) em estilos dentro da página (ex.: @font-face): caminho relativo e ficheiro copiado
+  html = html.replace(/url\((['"]?)https:\/\/www\.colegio-falcao\.com(\/[^'")]+)\1\)/g, (m, q, u) => `url(${q}${addFile(BASE + u)}${q})`);
   return html;
 }
 
