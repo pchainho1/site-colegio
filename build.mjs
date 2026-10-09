@@ -14,6 +14,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
+import { PurgeCSS } from 'purgecss';
 
 const SITE = (process.env.SITE_URL || 'https://novo.parque-falcao.com').replace(/\/$/, '');
 // Só conta se for um endereço https/http; qualquer outro valor (ou nada) usa feed.sample.json
@@ -121,7 +122,24 @@ const setMeta = (html, { title, desc }) => {
 
 const ASSETS = '<link rel="stylesheet" href="/assets/bootstrap.min.css"><link rel="stylesheet" href="/assets/theme.css">'
   + '<script defer src="/assets/jquery.min.js"></script><script defer src="/assets/theme.js"></script>';
-const finish = html => html.replace('<!--ASSETS-->', ASSETS).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
+// a primeira imagem do conteúdo (normalmente a maior, o LCP) carrega logo, sem esperar pelo JavaScript
+function eagerFirst(html) {
+  const a = html.indexOf('<picture', html.indexOf('<main'));
+  if (a < 0) return html;
+  const b = html.indexOf('</picture>', a);
+  const pic = html.slice(a, b)
+    .replace(/(<img\b[^>]*?)\s+src="[^"]*preloading_img\.svg"/, '$1')
+    .replace(/\bdata-(srcset|src)=/g, '$1=')
+    .replace(/(<img\b[^>]*?)class="lazy"/, '$1fetchpriority="high"')
+    .replace(/class="lazy"/g, '');
+  return html.slice(0, a) + pic + html.slice(b);
+}
+// O tema esconde a página (body com opacidade 0) até o JavaScript acrescentar "loaded": aqui a página
+// aparece logo; só os slides seguintes de cada carrossel ficam escondidos até o carrossel arrancar.
+const NO_FOUC = '<style>' + ['.hero-slider', '.know-us-slider', '.facilities-slider', '.text-slider-holder', '.news-slider', '.testimonials-slider', '.post-image-container', '.photos-slider']
+  .map(c => `${c}:not(.slick-initialized)>*+*`).join(',') + '{display:none}</style>';
+const showBody = html => html.replace(/<body\b([^>]*)>/, (m, attrs) => /class="/.test(attrs) ? `<body${attrs.replace(/class="/, 'class="loaded ')}>` : `<body${attrs} class="loaded">`);
+const finish = html => showBody(eagerFirst(html)).replace('<!--ASSETS-->', ASSETS + NO_FOUC).replace('<!--EXTRA_STYLES-->', '').split(OLD_SITE).join(SITE)
   .replace(/content="\/img\//g, `content="${SITE}/img/`);
 
 /* ---------- blog ---------- */
@@ -211,6 +229,19 @@ async function main() {
   await write('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${[...new Set(urls)].map(u => `<url><loc>${SITE}${u}</loc></url>`).join('')}</urlset>`);
   await write('robots.txt', `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
   await write('_headers', `/img/*\n  Cache-Control: public, max-age=31536000, immutable\n/storage/*\n  Cache-Control: public, max-age=31536000, immutable\n/themes/*\n  Cache-Control: public, max-age=604800\n/assets/*\n  Cache-Control: public, max-age=604800\n/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n`);
+  // CSS: Bootstrap + tema reduzidos ao que as páginas e o JavaScript usam, e postos dentro de cada página
+  // (evita 360 KB de CSS a bloquear a primeira pintura)
+  const html = []; await (async function walkDist(d) { for (const e of await fs.readdir(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) await walkDist(f); else if (f.endsWith('.html')) html.push(f); } })('dist');
+  const purged = await new PurgeCSS().purge({
+    content: [...html, 'dist/assets/theme.js'], css: ['dist/assets/bootstrap.min.css', 'dist/assets/theme.css'],
+    safelist: { standard: ['loaded'], greedy: [/^slick/, /active/, /open/, /show/, /fixed/, /scroll/, /visible/, /hidden/, /loading/] },
+  });
+  const css = purged.map(r => r.css).join('').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s*\n\s*/g, '');
+  for (const f of html) {
+    const h = await fs.readFile(f, 'utf8');
+    await fs.writeFile(f, h.replace('<link rel="stylesheet" href="/assets/bootstrap.min.css"><link rel="stylesheet" href="/assets/theme.css">', () => `<style>${css}</style>`));
+  }
+  console.log(`CSS: ${Math.round(css.length / 1024)} KB dentro de cada página (era ${Math.round(((await fs.stat('dist/assets/bootstrap.min.css')).size + (await fs.stat('dist/assets/theme.css')).size) / 1024)} KB)`);
   console.log(`${pages.length} páginas, ${blog('pt').length} artigos no blog. Concluído em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 }
 main().catch(e => { console.error(e); process.exit(1); });

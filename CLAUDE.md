@@ -16,6 +16,19 @@ entrega o feed JSON e as fotos (`?photo=<id>`, só fotos de artigos publicados)
 (o domínio colegio-falcao.com está noutra conta Cloudflare, gerida pelo atual alojamento do site; parque-falcao.com está na conta do Paulo).
 O visitante nunca fala com o Drive nem com o Apps Script.
 
+## Site com o aspeto do site atual (decidido)
+O site reproduz o aspeto do www.colegio-falcao.com (feito pela Adhesive, CMS October). `tools/import-site.mjs`
+(correr à mão com `NODE_USE_ENV_PROXY=1 node tools/import-site.mjs`) copia para `site/`: páginas PT e EN limpas
+(sem GTM/Analytics), tema (`site/assets/theme.css|js`), ícones/fontes/PDFs (`site/files`, mesmos caminhos) e as
+imagens WebP com os cortes de cada ecrã (`site/img`). `site/posts.json` tem os cartões dos 38 artigos antigos.
+`build.mjs`: serve as páginas com Bootstrap 5.1.0 e jQuery 3.6.0 (fixos, de node_modules), CSS reduzido com PurgeCSS e
+posto dentro de cada página, primeira imagem sem carregamento diferido, página visível sem esperar pelo JS.
+Gera a listagem do blog (`/blog`, `/blog/pagina/N`, também `/en/...`) e as notícias da página inicial.
+Artigos do Drive só entram depois de `ARCHIVE_UNTIL` (2026-06), no modelo de artigo do site atual, em `/blog/default/<slug>`.
+Mesmos endereços do site atual (ex.: `/o-colegio`), por isso não são precisos redirecionamentos ao trocar o domínio.
+Mapa dos contactos: a chave do Google Maps só aceita colegio-falcao.com (no domínio novo dá erro até se trocar o domínio
+ou acrescentar o domínio à chave).
+
 ## Ids do Drive
 - Pasta dos Docs do blog (privada): 1kG_XezakU4YEccvqDKXMqmpVEzPRMIBa
 - Pasta de fotos de maio (privada): 1tIHe0VxAKeSyDGdBf3eMGQQ4yM56kze1
@@ -46,9 +59,9 @@ NÃO testado: o .gs no Apps Script, descarga de fotos reais via lh3.googleuserco
    credenciais da conta de administrador do Paulo).
 3. Tornar privada a pasta de fotos aprovadas e confirmar autorizações de imagem antes de copiar fotos para lá.
 4. Deploy hook + BUILD_HOOK_URL no Apps Script + acionador de 15 min para `checkAndTriggerBuild`.
-5. Redirecionamentos dos endereços do site atual (`_redirects`): pedir a Paulo a lista de URLs atuais do blog.
+5. Redirecionamentos: já não são precisos (os endereços são os mesmos do site atual).
 6. Medir desempenho (PageSpeed) do site atual e do novo.
-7. Ainda não feito: PT/EN, assistente "Pergunte ao Falcão", restantes páginas do site.
+7. Ainda não feito: assistente "Pergunte ao Falcão". Google Analytics foi retirado (decidir se volta, com aviso de cookies).
 
 ## Marca
 Cores: #28066A (títulos), #3D09DD (botões), #6D3CEA, #25DBAE, #EDB92F, #F33340. Fonte da marca: Brown Std (licença web por
