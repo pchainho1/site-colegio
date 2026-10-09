@@ -263,19 +263,35 @@ function folderKey_(name) {
 
 /* ---------- 4. reconstruir o site quando algo muda ---------- */
 /**
- * Guarde o endereço do "deploy hook" da hospedagem em Propriedades do script (BUILD_HOOK_URL).
- * Crie um acionador por tempo (a cada 15 minutos) para esta função.
- * Só dispara a reconstrução se os artigos ou a lista de fotos tiverem mudado.
+ * Configuração (uma vez):
+ * 1. Na Cloudflare: Workers & Pages > site-colegio-falcao > Settings > Builds > Deploy Hooks > criar um hook
+ *    para o ramo main e copiar o endereço (https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/...).
+ * 2. Aqui: Definições do projeto > Propriedades do script > BUILD_HOOK_URL = esse endereço.
+ * 3. Executar instalarAcionador() uma vez (e aceitar a permissão para ligar a serviços externos).
+ *
+ * A cada 15 minutos, checkAndTriggerBuild() compara os artigos publicados e as fotos com os da última
+ * construção e só chama o hook quando algo mudou. O endereço do hook é secreto: não o partilhe nem o ponha no GitHub.
  */
 function checkAndTriggerBuild() {
   const props = PropertiesService.getScriptProperties();
   const hook = props.getProperty('BUILD_HOOK_URL');
-  if (!hook) return;
+  if (!hook) { Logger.log('Falta BUILD_HOOK_URL nas Propriedades do script.'); return; }
   const posts = publicView_(buildFeed_(), false).posts;
   const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(posts), Utilities.Charset.UTF_8);
   const hash = Utilities.base64Encode(digest);
-  if (hash === props.getProperty('LAST_BUILD_HASH')) return;
+  if (hash === props.getProperty('LAST_BUILD_HASH')) { Logger.log('Sem alterações: não é preciso reconstruir.'); return; }
   const res = UrlFetchApp.fetch(hook, { method: 'post', muteHttpExceptions: true });
-  if (res.getResponseCode() < 300) props.setProperty('LAST_BUILD_HASH', hash);
-  else Logger.log('Falha ao disparar a reconstrução: ' + res.getResponseCode());
+  if (res.getResponseCode() < 300) {
+    props.setProperty('LAST_BUILD_HASH', hash);
+    CacheService.getScriptCache().remove('feed');   // a construção vai buscar o feed já atualizado
+    Logger.log('Reconstrução pedida à Cloudflare: ' + res.getContentText().slice(0, 200));
+  } else Logger.log('Falha ao pedir a reconstrução (HTTP ' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 200));
+}
+
+// Executar uma vez: cria o acionador de 15 em 15 minutos (sem duplicar se já existir).
+function instalarAcionador() {
+  const existe = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'checkAndTriggerBuild');
+  if (!existe) ScriptApp.newTrigger('checkAndTriggerBuild').timeBased().everyMinutes(15).create();
+  Logger.log(existe ? 'O acionador já existia.' : 'Acionador criado: checkAndTriggerBuild a cada 15 minutos.');
+  checkAndTriggerBuild();
 }

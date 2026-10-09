@@ -2,6 +2,13 @@
   "name": "site-colegio-falcao",
   "private": true,
   "type": "module",
-  "scripts": { "build": "node build.mjs" },
-  "dependencies": { "@fontsource/jost": "^5.0.0", "sharp": "^0.33.5" }
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "bootstrap": "5.1.0",
+    "jquery": "3.6.0",
+    "purgecss": "^6.0.0",
+    "sharp": "^0.33.5"
+  }
 }
